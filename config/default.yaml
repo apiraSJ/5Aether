@@ -1,0 +1,14 @@
+# default.yaml
+camera:
+  device_index: 0
+  width: 640
+  height: 480
+model:
+  weights: "yolov8n.pt"  # downloaded at root
+  confidence: 0.25
+logging:
+  level: "INFO"
+  file: "logs/aether.log"
+hud:
+  show_fps: true
+  show_telemetry: true

@@ -1,0 +1,9 @@
+2026-07-19 02:58:03,885 [INFO] Aether - Logger initialized.
+2026-07-19 02:58:03,885 [INFO] Aether - Initializing Aether desktop runtime...
+2026-07-19 02:58:03,885 [WARNING] Aether.Calibration - No calibration file specified or found. Using generic pinhole approximation.
+2026-07-19 02:58:12,911 [INFO] Aether.Camera - Camera opened (index=0, resolution=640x480)
+2026-07-19 02:58:12,911 [INFO] Aether.Detector - Initializing YOLO detector with weights: yolov8n.pt
+2026-07-19 02:58:13,001 [INFO] Aether - Aether startup successful. Starting pipeline loop.
+2026-07-19 03:01:32,259 [INFO] Aether - Exit command received. Shutting down Aether.
+2026-07-19 03:01:32,566 [INFO] Aether.Camera - Camera device released.
+2026-07-19 03:01:32,602 [INFO] Aether - Aether cleanup completed. Clean exit.
