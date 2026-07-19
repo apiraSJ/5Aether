@@ -1,0 +1,43 @@
+# Desktop profile for Aether
+camera:
+  device_index: 0
+  width: 640
+  height: 480
+  fps_target: 30
+
+model:
+  weights: "yolov8n.pt"
+  confidence: 0.25
+  enabled: true
+
+hand_tracking:
+  enabled: true
+  model_path: "models/hand_landmarker.task"
+  num_hands: 2
+  min_detection_confidence: 0.7
+  min_tracking_confidence: 0.5
+
+gesture_engine:
+  enabled: true
+  movement_stability_px: 8
+  dwell_time_ms: 500
+
+interaction:
+  default_mode: "passive"
+  activation_gesture: "OPEN_PALM"
+  activation_dwell_ms: 800
+  preview_timeout_ms: 3000
+
+logging:
+  level: "INFO"
+  file: "logs/aether.log"
+
+dashboard:
+  theme: "dark"
+  show_hand_landmarks: true
+  show_gesture_state: true
+  sidebar_width: 280
+
+hud:
+  show_fps: true
+  show_telemetry: true

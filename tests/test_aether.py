@@ -7,6 +7,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from config import load_config
+from core.app import AetherApp
 from core.performance import PerformanceTimer, PerformanceTracker
 from core.telemetry import Telemetry
 from vision.geometry import calculate_distance
@@ -19,6 +20,11 @@ class TestAether(unittest.TestCase):
         self.assertIn("camera", cfg)
         self.assertIn("model", cfg)
         self.assertEqual(cfg["camera"]["device_index"], 0)
+
+    def test_initialize_starts_app_running(self):
+        app = AetherApp("config/desktop.yaml")
+        app.initialize()
+        self.assertTrue(app.is_running)
 
     def test_performance_timer(self):
         with PerformanceTimer("TestTimer") as timer:

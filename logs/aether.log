@@ -7,3 +7,27 @@
 2026-07-19 03:01:32,259 [INFO] Aether - Exit command received. Shutting down Aether.
 2026-07-19 03:01:32,566 [INFO] Aether.Camera - Camera device released.
 2026-07-19 03:01:32,602 [INFO] Aether - Aether cleanup completed. Clean exit.
+2026-07-19 03:29:09,727 [INFO] Aether - Logger initialized.
+2026-07-19 03:29:09,728 [INFO] Aether - Initializing Aether desktop runtime...
+2026-07-19 03:29:09,728 [WARNING] Aether.Calibration - No calibration file specified or found. Using generic pinhole approximation.
+2026-07-19 03:29:19,914 [INFO] Aether.Camera - Camera opened (index=0, resolution=640x480)
+2026-07-19 03:29:19,914 [INFO] Aether.Detector - Initializing YOLO detector with weights: yolov8n.pt
+2026-07-19 03:29:20,011 [INFO] Aether - Aether startup successful. Starting pipeline loop.
+2026-07-19 03:44:58,309 [INFO] Aether - Logger initialized.
+2026-07-19 03:44:58,309 [INFO] Aether - Initializing Aether desktop runtime...
+2026-07-19 03:44:58,309 [WARNING] Aether.Calibration - No calibration file specified or found. Using generic pinhole approximation.
+2026-07-19 03:45:07,576 [INFO] Aether.Camera - Camera opened (index=0, resolution=640x480)
+2026-07-19 03:45:07,576 [INFO] Aether.Detector - Initializing YOLO detector with weights: yolov8n.pt
+2026-07-19 03:45:07,655 [INFO] Aether - Aether startup successful. Starting pipeline loop.
+2026-07-19 03:45:15,402 [INFO] Aether - Exit command received. Shutting down Aether.
+2026-07-19 03:45:15,695 [INFO] Aether.Camera - Camera device released.
+2026-07-19 03:45:15,730 [INFO] Aether - Aether cleanup completed. Clean exit.
+2026-07-19 03:46:07,721 [INFO] Aether - Logger initialized.
+2026-07-19 03:46:07,721 [INFO] Aether - Initializing Aether desktop runtime...
+2026-07-19 03:46:07,721 [WARNING] Aether.Calibration - No calibration file specified or found. Using generic pinhole approximation.
+2026-07-19 03:46:17,820 [INFO] Aether.Camera - Camera opened (index=0, resolution=640x480)
+2026-07-19 03:46:17,820 [INFO] Aether.Detector - Initializing YOLO detector with weights: yolov8n.pt
+2026-07-19 03:46:17,907 [INFO] Aether - Aether startup successful. Starting pipeline loop.
+2026-07-19 03:46:28,106 [INFO] Aether - Exit command received. Shutting down Aether.
+2026-07-19 03:46:28,401 [INFO] Aether.Camera - Camera device released.
+2026-07-19 03:46:28,442 [INFO] Aether - Aether cleanup completed. Clean exit.

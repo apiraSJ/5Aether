@@ -1,0 +1,77 @@
+{
+  "test_01": {
+    "id": "test_01",
+    "name": "Hammer",
+    "label": "",
+    "location": "Workbench",
+    "position_3d": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "last_seen": "2026-07-19T21:22:28.484938",
+    "status": "Visible",
+    "track_id": null,
+    "metadata": {}
+  },
+  "obj_55db4a98": {
+    "id": "obj_55db4a98",
+    "name": "screwdriver",
+    "label": "",
+    "location": "toolbox",
+    "position_3d": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "last_seen": "2026-07-19T21:22:28.491941",
+    "status": "Visible",
+    "track_id": null,
+    "metadata": {}
+  },
+  "hammer_01": {
+    "id": "hammer_01",
+    "name": "Hammer",
+    "label": "",
+    "location": "Workbench",
+    "position_3d": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "last_seen": "2026-07-19T22:14:15.605205",
+    "status": "Visible",
+    "track_id": null,
+    "metadata": {}
+  },
+  "wrench_01": {
+    "id": "wrench_01",
+    "name": "Wrench",
+    "label": "",
+    "location": "Toolbox",
+    "position_3d": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "last_seen": "2026-07-19T21:46:56.608269",
+    "status": "Visible",
+    "track_id": null,
+    "metadata": {}
+  },
+  "obj_2bbe2d6f": {
+    "id": "obj_2bbe2d6f",
+    "name": "screwdriver",
+    "label": "",
+    "location": "workbench",
+    "position_3d": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "last_seen": "2026-07-19T21:46:56.633637",
+    "status": "Visible",
+    "track_id": null,
+    "metadata": {}
+  }
+}
