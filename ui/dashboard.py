@@ -4,6 +4,7 @@ import numpy as np
 import cv2
 
 import dearpygui.dearpygui as dpg
+from core.event_bus import EventType
 
 
 class Dashboard:
@@ -15,6 +16,8 @@ class Dashboard:
         self._perception = None
         self._gesture_engine = None
         self._command_confirmation = None
+        self._perception_worker = None
+        self._hand_overlay = None
         self._frame = None
         self._objects = []
         self._tasks = []
@@ -35,6 +38,11 @@ class Dashboard:
 
     def set_command_confirmation(self, confirmer):
         self._command_confirmation = confirmer
+
+    def set_perception_worker(self, worker):
+        self._perception_worker = worker
+        from ui.hand_overlay import HandOverlay
+        self._hand_overlay = HandOverlay()
 
     def initialize(self):
         dpg.create_context()
@@ -108,21 +116,64 @@ class Dashboard:
             dpg.add_text("0 active", tag="tasks_display")
 
     def _on_frame(self, sender, app_data):
-        """Called every DearPyGui frame. Processes camera and updates texture."""
+        """Called every DearPyGui frame. Pulls latest perception snapshot
+        from the background worker and draws overlays onto the texture."""
         if not self._initialized:
             return
 
-        # 1. Grab frame from camera thread
-        if self._camera:
-            frame = self._camera.get_frame()
-            if frame is not None:
-                self._frame = frame
-                self._camera_ok = True
-                self._update_texture(frame)
-                self._process_frame(frame)
-                self._update_fps()
+        # 1. Grab the latest camera frame for display
+        frame = self._camera.get_frame() if self._camera else None
+        if frame is not None:
+            self._frame = frame
+            self._camera_ok = True
 
-        # 2. Update sidebar status
+            # 2. Pull perception results computed off-thread by the worker
+            snapshot = None
+            if self._perception_worker:
+                snapshot = self._perception_worker.get_latest()
+
+            display = frame.copy()
+            if snapshot:
+                # Draw YOLO boxes + PnP distance
+                for item in snapshot.pnp:
+                    box = item.get("box")
+                    if not box:
+                        continue
+                    x1, y1, x2, y2 = map(int, box)
+                    label = item.get("label", "?")
+                    conf = item.get("confidence", 0.0)
+                    cv2.rectangle(display, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    text = f"{label} {conf:.2f}"
+                    if item.get("distance_cm") is not None:
+                        text += f" {item['distance_cm']:.0f}cm"
+                    cv2.putText(display, text, (x1, y1 - 10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+                # Draw hand skeleton + gesture
+                gesture = snapshot.gestures[0] if snapshot.gestures else None
+                if self._hand_overlay:
+                    display = self._hand_overlay.draw(
+                        display, snapshot.hand_results, gesture
+                    )
+
+                # Update sidebar text
+                labels = [d.get("label", "?") for d in snapshot.detections[:5]]
+                obj_text = ", ".join(labels) if labels else "No objects detected"
+                if len(snapshot.detections) > 5:
+                    obj_text += f" (+{len(snapshot.detections) - 5} more)"
+                if dpg.does_item_exist("objects_text"):
+                    dpg.set_value("objects_text", obj_text)
+                if dpg.does_item_exist("gesture_display"):
+                    g = gesture or "None"
+                    dpg.set_value("gesture_display", f"Gesture: {g}")
+                if dpg.does_item_exist("mode_display"):
+                    dpg.set_value("mode_display", f"Mode: {snapshot.mode}")
+                if dpg.does_item_exist("fps_display"):
+                    dpg.set_value("fps_display", f"FPS: {snapshot.fps:.1f}")
+
+            self._update_texture(display)
+
+        # 3. Update sidebar status
         if dpg.does_item_exist("status_camera"):
             status = "Connected" if self._camera_ok else "Disconnected"
             dpg.set_value("status_camera", f"Camera: {status}")
@@ -138,57 +189,6 @@ class Dashboard:
                 dpg.set_value("camera_texture", texture_data)
         except Exception as e:
             self.logger.error(f"Texture update error: {e}")
-
-    def _process_frame(self, frame):
-        """Run perception pipeline on the frame."""
-        if not self._perception:
-            return
-        try:
-            result = self._perception.process(frame)
-
-            # Update detected objects display
-            if result.detections:
-                self._objects = result.detections
-                labels = [d.get("label", "?") for d in result.detections[:5]]
-                obj_text = ", ".join(labels)
-                if len(result.detections) > 5:
-                    obj_text += f" (+{len(result.detections) - 5} more)"
-                if dpg.does_item_exist("objects_text"):
-                    dpg.set_value("objects_text", obj_text)
-
-            # Run gesture engine
-            if result.hand_results and self._gesture_engine:
-                gestures = self._gesture_engine.update(result.hand_results)
-                for gesture_event in gestures:
-                    if self.event_bus:
-                        self.event_bus.emit(
-                            EventType.GESTURE_RECOGNIZED,
-                            data={"gesture": gesture_event.gesture.value},
-                            source="gesture_engine"
-                        )
-                    if dpg.does_item_exist("gesture_display"):
-                        dpg.set_value("gesture_display", f"Gesture: {gesture_event.gesture.value}")
-
-                    if self._command_confirmation:
-                        actions = self._command_confirmation.handle_gesture(gesture_event)
-                        for action in actions:
-                            if action.type == "CANCEL":
-                                self._command_confirmation.cancel()
-
-        except Exception as e:
-            self.logger.error(f"Perception error: {e}")
-
-    def _update_fps(self):
-        """Calculate and display FPS."""
-        self._frame_count += 1
-        now = time.time()
-        elapsed = now - self._last_fps_time
-        if elapsed >= 1.0:
-            self._fps = self._frame_count / elapsed
-            self._frame_count = 0
-            self._last_fps_time = now
-            if dpg.does_item_exist("fps_display"):
-                dpg.set_value("fps_display", f"FPS: {self._fps:.1f}")
 
     def shutdown(self):
         if self._initialized:

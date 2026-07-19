@@ -1,32 +1,87 @@
-import sys
 import logging
+import threading
 import time
 import numpy as np
 import cv2
 
 from core.app import AetherApp
 from core.event_bus import EventType
-from core.camera_thread import CameraThread
-from core.perception_pipeline import PerceptionPipeline
-from vision.gesture_engine import GestureEngine
-from vision.command_confirmation import CommandConfirmation
-from memory.object_memory import ObjectMemory
-from tasks.manager import TaskManager
-from commands import CommandRegistry
-from commands.remember import RememberCommand
-from commands.find import FindCommand
-from commands.forget import ForgetCommand
-from commands.list_cmd import ListCommand
-from commands.status import StatusCommand
-from commands.task import TaskCommand
-from database.objects import ObjectStore
-from database.tasks import TaskStore
+from core.frame_broker import FrameBroker
+from perception.hand_plugin import HandPerceptionPlugin
+from perception.object_plugin import ObjectSpatialPlugin
+
+# Global runtime state updated by bus subscribers
+runtime_hands = []
+runtime_objects = []
+state_lock = threading.Lock()
+
+
+def on_hand_update(event):
+    global runtime_hands
+    with state_lock:
+        runtime_hands = event.data.get("hands", [])
+
+
+def on_object_update(event):
+    global runtime_objects
+    with state_lock:
+        runtime_objects = event.data.get("objects", [])
+
+
+def camera_producer(broker: FrameBroker, device_index: int = 0, width: int = 640, height: int = 480):
+    """Camera capture loop feeding frames into the FrameBroker."""
+    cap = cv2.VideoCapture(device_index)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    if not cap.isOpened():
+        logging.getLogger("Aether.Main").error(f"Failed to open camera {device_index}")
+        return
+    logging.getLogger("Aether.Main").info(f"Camera started (index={device_index})")
+    while cap.isOpened():
+        success, frame = cap.read()
+        if not success:
+            break
+        broker.update_frame(frame)
+        time.sleep(0.016)
+    cap.release()
+
+
+def process_hud_overlays(frame, hands, objects):
+    """Draws tracking assets, skeletal vectors, and spatial metrics onto output frames."""
+    h, w = frame.shape[:2]
+
+    # Render YOLO objects with bounding boxes and distance
+    for obj in objects:
+        x1, y1, x2, y2 = obj["box"]
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
+        lbl = f"{obj['name']} ({obj['conf']:.2f}) Z: {obj['distance_z']:.2f}m"
+        cv2.putText(frame, lbl, (x1, max(y1 - 10, 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+
+    # Render hand landmarks + connections
+    connections = [
+        (0, 1), (1, 2), (2, 3), (3, 4),
+        (0, 5), (5, 6), (6, 7), (7, 8),
+        (5, 9), (9, 10), (10, 11), (11, 12),
+        (9, 13), (13, 14), (14, 15), (15, 16),
+        (13, 17), (17, 18), (18, 19), (19, 20),
+        (0, 17),
+    ]
+    for hand in hands:
+        pts = np.array([[int(lm["x"] * w), int(lm["y"] * h)] for lm in hand["landmarks"]])
+        for pt in pts:
+            cv2.circle(frame, tuple(pt), 4, (0, 255, 0), -1)
+        for a, b in connections:
+            if a < len(pts) and b < len(pts):
+                cv2.line(frame, tuple(pts[a]), tuple(pts[b]), (255, 0, 0), 1)
+        cv2.putText(frame, hand["label"], tuple(pts[0]), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+    return frame
 
 
 def main():
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s - %(message)s"
+        format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
     )
     logger = logging.getLogger("Aether.Main")
     logger.info("Starting Aether...")
@@ -35,140 +90,80 @@ def main():
     app = AetherApp("config/desktop.yaml")
     app.initialize()
 
-    # 2. Initialize memory, tasks, commands
-    memory = ObjectMemory(ObjectStore())
-    task_manager = TaskManager(TaskStore())
+    # 2. Initialize infrastructural components
+    bus = app.event_bus
+    broker = FrameBroker()
 
-    registry = CommandRegistry()
-    registry.register(RememberCommand(memory))
-    registry.register(FindCommand(memory))
-    registry.register(ForgetCommand(memory))
-    registry.register(ListCommand(memory, task_manager))
-    registry.register(StatusCommand(memory))
-    registry.register(TaskCommand(task_manager))
+    bus.subscribe(EventType.HAND_DETECTED, on_hand_update)
+    bus.subscribe(EventType.OBJECT_DETECTED, on_object_update)
 
-    gesture_engine = GestureEngine(app.settings.get("gesture_engine"))
-    command_confirmation = CommandConfirmation(app.settings.get("interaction"))
-    perception = PerceptionPipeline(app.event_bus, app.plugin_manager)
+    # 3. Spawn concurrent perception pipelines
+    cam_config = app.settings.get("camera") or {}
+    hand_config = app.settings.get("hand_tracking") or {}
+    model_config = app.settings.get("model") or {}
 
-    # 3. Register perception plugins
-    from plugins.yolo_plugin import YoloPlugin
-    from plugins.hand_plugin import HandPlugin
-    app.plugin_manager.register(YoloPlugin())
-    app.plugin_manager.register(HandPlugin())
-    app.plugin_manager.initialize_all(app.settings.all)
+    hand_worker = HandPerceptionPlugin(broker, bus, hand_config.get("model_path", "models/hand_landmarker.task"), hand_config)
+    obj_worker = ObjectSpatialPlugin(broker, bus, model_config.get("weights", "yolov8n.pt"), model_config)
 
-    # 4. Start camera thread
-    camera = None
-    camera_config = app.settings.get("camera")
-    try:
-        camera = CameraThread(camera_config)
-        camera.start()
-        logger.info("Camera started")
-    except Exception as e:
-        logger.warning(f"Camera unavailable: {e}. Running without camera feed.")
+    hand_worker.start()
+    obj_worker.start()
 
-    # 5. Try DearPyGui dashboard
+    cam_thread = threading.Thread(
+        target=camera_producer,
+        args=(broker, cam_config.get("device_index", 0), cam_config.get("width", 640), cam_config.get("height", 480)),
+        daemon=True,
+    )
+    cam_thread.start()
+
+    # 4. DearPyGui UI
     use_dpg = True
     try:
         import dearpygui.dearpygui as dpg
         dpg.create_context()
-        dpg.create_viewport(title="Aether Spatial Assistant", width=1280, height=720)
+        dpg.create_viewport(title="Aether Framework - Phase 2 Engine", width=1024, height=600)
 
-        # Create placeholder texture (RGBA — 4 channels per pixel)
-        placeholder = np.zeros((480, 640, 4), dtype=np.float32)
-        placeholder[..., 3] = 1.0
-        with dpg.texture_registry():
-            dpg.add_dynamic_texture(640, 480, placeholder.flatten().tolist(), tag="camera_texture")
+        blank_texture = np.zeros((480, 640, 4), dtype=np.float32)
+        blank_texture[..., 3] = 1.0
+        with dpg.texture_registry(show=False):
+            dpg.add_dynamic_texture(width=640, height=480, default_value=blank_texture, tag="hud_texture")
 
-        with dpg.window(tag="main_window"):
+        with dpg.window(label="Aether Core Execution Platform", width=1024, height=600):
             with dpg.group(horizontal=True):
-                # Sidebar
-                with dpg.group(width=280):
-                    dpg.add_text("AETHER", tag="app_title")
+                dpg.add_image("hud_texture")
+                with dpg.child_window(width=340, height=480, label="Metrics Dashboard"):
+                    dpg.add_text("Aether Perception Engine", color=[0, 255, 255])
                     dpg.add_separator()
-                    dpg.add_text("Navigation")
-                    dpg.add_button(label="Dashboard")
-                    dpg.add_button(label="Objects")
-                    dpg.add_button(label="Tasks")
-                    dpg.add_button(label="Perception")
-                    dpg.add_button(label="Logs")
+                    dpg.add_text("Spatial Pipeline Nodes:")
+                    dpg.add_text("  YOLO Object Detection: Running")
+                    dpg.add_text("  MediaPipe Hand Tracking: Running")
+                    dpg.add_text("  PnP Spatial Estimation: Running")
                     dpg.add_separator()
-                    dpg.add_text("Perception Status")
-                    cam_status = "Connected" if (camera and camera.is_running) else "Disconnected"
-                    dpg.add_text(f"Camera: {cam_status}", tag="status_camera")
-                    dpg.add_text("YOLO: Ready", tag="status_yolo")
-                    dpg.add_text("Hands: Ready", tag="status_hands")
-
-                # Main area
-                with dpg.group():
-                    dpg.add_text("Camera Feed")
-                    dpg.add_image("camera_texture", width=640, height=480)
-                    dpg.add_separator()
-                    dpg.add_text("Detected Objects")
-                    dpg.add_text("No objects detected", tag="objects_text")
-
-                # Status panel
-                with dpg.group(width=200):
-                    dpg.add_text("System Status")
-                    dpg.add_separator()
-                    dpg.add_text("FPS: 0.0", tag="fps_display")
-                    dpg.add_text("Gesture: None", tag="gesture_display")
-                    dpg.add_text("Mode: Passive", tag="mode_display")
-                    dpg.add_separator()
-                    dpg.add_text("Tasks")
-                    dpg.add_text("0 active", tag="tasks_display")
-
-        dpg.set_primary_window("main_window", True)
-
-        # Frame counter for FPS
-        frame_count = [0]
-        last_fps_time = [time.time()]
-
-        def on_frame(sender, app_data):
-            nonlocal frame_count, last_fps_time
-
-            # Grab frame from camera
-            if camera:
-                frame = camera.get_frame()
-                if frame is not None:
-                    # Update texture
-                    try:
-                        rgba = cv2.cvtColor(frame, cv2.COLOR_BGR2RGBA)
-                        resized = cv2.resize(rgba, (640, 480))
-                        texture_data = (resized.astype(np.float32) / 255.0).flatten().tolist()
-                        if dpg.does_item_exist("camera_texture"):
-                            dpg.set_value("camera_texture", texture_data)
-                    except Exception as e:
-                        logger.error(f"Texture error: {e}")
-
-                    # Run perception
-                    try:
-                        result = perception.process(frame)
-                        if result.detections:
-                            labels = [d.get("label", "?") for d in result.detections[:5]]
-                            obj_text = ", ".join(labels)
-                            if dpg.does_item_exist("objects_text"):
-                                dpg.set_value("objects_text", obj_text)
-                    except Exception as e:
-                        logger.error(f"Perception error: {e}")
-
-                    # Update FPS
-                    frame_count[0] += 1
-                    now = time.time()
-                    if now - last_fps_time[0] >= 1.0:
-                        fps = frame_count[0] / (now - last_fps_time[0])
-                        frame_count[0] = 0
-                        last_fps_time[0] = now
-                        if dpg.does_item_exist("fps_display"):
-                            dpg.set_value("fps_display", f"FPS: {fps:.1f}")
+                    dpg.add_text("Objects: 0", tag="obj_count")
+                    dpg.add_text("Hands: 0", tag="hand_count")
 
         dpg.setup_dearpygui()
         dpg.show_viewport()
-        logger.info("Dashboard ready. Window should be visible.")
+        logger.info("Dashboard ready.")
 
+        # 5. Render loop
         while dpg.is_dearpygui_running():
-            on_frame(None, None)
+            raw_frame = broker.get_frame()
+            if raw_frame is not None:
+                with state_lock:
+                    current_hands = list(runtime_hands)
+                    current_objects = list(runtime_objects)
+
+                processed = process_hud_overlays(raw_frame.copy(), current_hands, current_objects)
+
+                rgba = cv2.cvtColor(processed, cv2.COLOR_BGR2RGBA)
+                float_texture = np.ascontiguousarray(rgba, dtype=np.float32) / 255.0
+                dpg.set_value("hud_texture", float_texture)
+
+                if dpg.does_item_exist("obj_count"):
+                    dpg.set_value("obj_count", f"Objects: {len(current_objects)}")
+                if dpg.does_item_exist("hand_count"):
+                    dpg.set_value("hand_count", f"Hands: {len(current_hands)}")
+
             dpg.render_dearpygui_frame()
 
         dpg.destroy_context()
@@ -182,41 +177,29 @@ def main():
         except Exception:
             pass
 
-    # 6. OpenCV fallback if DearPyGui failed
+    # 6. OpenCV fallback
     if not use_dpg:
         logger.info("Using OpenCV window. Press 'q' to exit.")
         try:
             while True:
-                frame = camera.get_frame() if camera else None
-                if frame is None:
+                raw_frame = broker.get_frame()
+                if raw_frame is None:
                     time.sleep(0.01)
                     continue
 
-                display = frame.copy()
-                result = perception.process(frame)
+                with state_lock:
+                    current_hands = list(runtime_hands)
+                    current_objects = list(runtime_objects)
 
-                for det in result.detections:
-                    x1, y1, x2, y2 = det.get("box", (0, 0, 0, 0))
-                    label = det.get("label", "?")
-                    conf = det.get("confidence", 0)
-                    cv2.rectangle(display, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                    cv2.putText(display, f"{label} {conf:.2f}", (x1, y1 - 10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                processed = process_hud_overlays(raw_frame.copy(), current_hands, current_objects)
 
-                if result.hand_results:
-                    for hand in result.hand_results.hands:
-                        for lm in hand.landmarks:
-                            x = int(lm.x * display.shape[1])
-                            y = int(lm.y * display.shape[0])
-                            cv2.circle(display, (x, y), 3, (0, 0, 255), -1)
-
-                cv2.putText(display, "Aether Spatial Assistant", (10, 30),
+                cv2.putText(processed, "Aether Spatial Assistant", (10, 30),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-                cv2.putText(display, "Press 'q' to exit", (10, 60),
+                cv2.putText(processed, "Press 'q' to exit", (10, 60),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
-                cv2.imshow("Aether", display)
-                if cv2.waitKey(1) & 0xFF == ord('q'):
+                cv2.imshow("Aether", processed)
+                if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
         except KeyboardInterrupt:
             pass
@@ -224,8 +207,8 @@ def main():
             cv2.destroyAllWindows()
 
     # 7. Cleanup
-    if camera:
-        camera.stop()
+    hand_worker.stop()
+    obj_worker.stop()
     app.plugin_manager.shutdown_all()
     app.shutdown()
     logger.info("Aether shutdown complete")
