@@ -44,7 +44,7 @@ class CommandConfirmation:
                 )
                 actions.append(Action(type="PREVIEW", target=target))
 
-        elif gesture_event.gesture == GestureType.PINCH and self.pending_action:
+        elif gesture_event.gesture == GestureType.THUMBS_UP and self.pending_action:
             action = self.pending_action
             self.pending_action = None
             actions.append(Action(type="EXECUTE", action=action.action, target=action.target))

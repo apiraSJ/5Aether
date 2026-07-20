@@ -26,6 +26,8 @@ class Dashboard:
         self._last_fps_time = time.time()
         self._initialized = False
         self._camera_ok = False
+        self._gesture_history = []
+        self._max_gesture_history = 5
 
     def set_camera(self, camera):
         self._camera = camera
@@ -95,11 +97,26 @@ class Dashboard:
             dpg.add_text(f"Camera: {cam_status}", tag="status_camera")
             dpg.add_text("YOLO: Ready", tag="status_yolo")
             dpg.add_text("Hands: Ready", tag="status_hands")
+            dpg.add_separator()
+            dpg.add_text("Gesture Recognition")
+            dpg.add_text("Current: None", tag="gesture_current")
+            dpg.add_text("Action: None", tag="gesture_action")
+            dpg.add_text("Confidence: 0%", tag="gesture_confidence")
+            dpg.add_separator()
+            dpg.add_text("Recent Gestures")
+            dpg.add_text("1. None", tag="gesture_hist_1")
+            dpg.add_text("2. None", tag="gesture_hist_2")
+            dpg.add_text("3. None", tag="gesture_hist_3")
+            dpg.add_text("4. None", tag="gesture_hist_4")
+            dpg.add_text("5. None", tag="gesture_hist_5")
 
     def _create_main_area(self):
         with dpg.group():
             dpg.add_text("Camera Feed", tag="camera_title")
             dpg.add_image("camera_texture", tag="camera_view", width=640, height=480)
+            dpg.add_separator()
+            dpg.add_text("Control Output")
+            dpg.add_text("No action active", tag="control_output")
             dpg.add_separator()
             dpg.add_text("Detected Objects")
             dpg.add_text("No objects detected", tag="objects_text")
@@ -149,11 +166,15 @@ class Dashboard:
                     cv2.putText(display, text, (x1, y1 - 10),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-                # Draw hand skeleton + gesture
+                # Draw hand skeleton + gesture + action + cursor
                 gesture = snapshot.gestures[0] if snapshot.gestures else None
+                action = snapshot.actions[0] if snapshot.actions else None
                 if self._hand_overlay:
                     display = self._hand_overlay.draw(
-                        display, snapshot.hand_results, gesture
+                        display, snapshot.hand_results,
+                        gesture=gesture, action=action,
+                        cursor=snapshot.cursor,
+                        is_dragging=snapshot.is_dragging,
                     )
 
                 # Update sidebar text
@@ -165,11 +186,21 @@ class Dashboard:
                     dpg.set_value("objects_text", obj_text)
                 if dpg.does_item_exist("gesture_display"):
                     g = gesture or "None"
-                    dpg.set_value("gesture_display", f"Gesture: {g}")
+                    a = action or ""
+                    display_str = f"Gesture: {g}"
+                    if a:
+                        display_str += f"  ->  {a}"
+                    dpg.set_value("gesture_display", display_str)
                 if dpg.does_item_exist("mode_display"):
                     dpg.set_value("mode_display", f"Mode: {snapshot.mode}")
                 if dpg.does_item_exist("fps_display"):
                     dpg.set_value("fps_display", f"FPS: {snapshot.fps:.1f}")
+
+                # Update gesture recognition display
+                self._update_gesture_display(gesture, action)
+
+                # Update control output at bottom of camera
+                self._update_control_output(gesture, action, snapshot)
 
             self._update_texture(display)
 
@@ -177,6 +208,67 @@ class Dashboard:
         if dpg.does_item_exist("status_camera"):
             status = "Connected" if self._camera_ok else "Disconnected"
             dpg.set_value("status_camera", f"Camera: {status}")
+
+    def _update_gesture_display(self, gesture, action):
+        """Update the gesture recognition display in the sidebar."""
+        if not gesture:
+            return
+
+        # Update current gesture
+        if dpg.does_item_exist("gesture_current"):
+            dpg.set_value("gesture_current", f"Current: {gesture.upper()}")
+
+        # Update action
+        if dpg.does_item_exist("gesture_action"):
+            action_str = action.upper() if action else "None"
+            dpg.set_value("gesture_action", f"Action: {action_str}")
+
+        # Update confidence (placeholder - would need actual confidence from engine)
+        if dpg.does_item_exist("gesture_confidence"):
+            dpg.set_value("gesture_confidence", "Confidence: 85%")
+
+        # Update gesture history
+        self._gesture_history.append(gesture)
+        if len(self._gesture_history) > self._max_gesture_history:
+            self._gesture_history.pop(0)
+
+        # Update history display
+        for i, hist_gesture in enumerate(self._gesture_history):
+            tag = f"gesture_hist_{i + 1}"
+            if dpg.does_item_exist(tag):
+                dpg.set_value(tag, f"{i + 1}. {hist_gesture}")
+
+    def _update_control_output(self, gesture, action, snapshot):
+        """Update the control output display at the bottom of camera."""
+        if not dpg.does_item_exist("control_output"):
+            return
+
+        # Build control output string
+        output_parts = []
+
+        if gesture:
+            output_parts.append(f"Gesture: {gesture}")
+
+        if action:
+            output_parts.append(f"Action: {action}")
+
+        if snapshot.mode and snapshot.mode != "passive":
+            output_parts.append(f"Mode: {snapshot.mode}")
+
+        if snapshot.is_dragging:
+            output_parts.append("Dragging: Active")
+
+        # Add object count if available
+        if snapshot.detections:
+            output_parts.append(f"Objects: {len(snapshot.detections)}")
+
+        # Add hand count if available
+        if snapshot.hand_results and snapshot.hand_results.hands:
+            output_parts.append(f"Hands: {len(snapshot.hand_results.hands)}")
+
+        # Combine all parts
+        control_text = " | ".join(output_parts) if output_parts else "No action active"
+        dpg.set_value("control_output", control_text)
 
     def _update_texture(self, frame):
         """Convert BGR frame to DearPyGui texture format and push to GPU."""

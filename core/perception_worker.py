@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from core.perception_pipeline import PerceptionPipeline
 from vision.gesture_engine import GestureEngine
+from vision.gesture_executor import GestureActionExecutor
 from vision.command_confirmation import CommandConfirmation
 from vision.spatial import SpatialEstimator
 from core.event_bus import EventType
@@ -19,6 +20,9 @@ class PerceptionSnapshot:
     pnp: list = field(default_factory=list)  # [{label, distance_cm, box, confidence}]
     hand_results: Any = None
     gestures: list = field(default_factory=list)  # active gesture labels
+    actions: list = field(default_factory=list)  # actions executed this frame
+    cursor: tuple = (0.5, 0.5)  # normalized cursor position
+    is_dragging: bool = False
     mode: str = "passive"
     fps: float = 0.0
     timestamp: float = 0.0
@@ -50,6 +54,9 @@ class PerceptionWorker:
 
         self.fps_target = self.config.get("fps_target", 15)
         self.spatial_estimator = SpatialEstimator(self.config.get("spatial", {}))
+
+        # Gesture executor: maps gesture events → actions → bus events
+        self.gesture_executor = GestureActionExecutor(event_bus, gesture_engine)
 
         self._pipeline = PerceptionPipeline(event_bus, plugin_manager)
         self._thread: Optional[threading.Thread] = None
@@ -123,17 +130,32 @@ class PerceptionWorker:
                 }
             )
 
-        # Gestures
-        gestures = []
+        # Gestures + Actions
+        gesture_labels = []
+        action_labels = []
+        cursor = (0.5, 0.5)
+        is_dragging = False
+
         if result.hand_results and self.gesture_engine:
-            events = self.gesture_engine.update(result.hand_results)
-            for ge in events:
-                gestures.append(ge.gesture.value)
-                self.event_bus.emit(
-                    EventType.GESTURE_RECOGNIZED,
-                    data={"gesture": ge.gesture.value},
-                    source="gesture_engine",
-                )
+            # Run gesture recognition
+            gesture_events = self.gesture_engine.update(result.hand_results)
+
+            # Execute gesture → action mapping
+            if self.gesture_executor:
+                actions = self.gesture_executor.process_events(gesture_events)
+                for a in actions:
+                    gesture_labels.append(a.gesture.value)
+                    action_labels.append(a.action.value)
+
+                cursor = self.gesture_executor.get_cursor()
+                is_dragging = False
+
+            # Emit raw gesture events for legacy consumers
+            for ge in gesture_events:
+                if ge.gesture.value not in gesture_labels:
+                    gesture_labels.append(ge.gesture.value)
+
+                # Legacy command_confirmation still runs
                 if self.command_confirmation:
                     actions = self.command_confirmation.handle_gesture(ge)
                     for action in actions:
@@ -143,6 +165,10 @@ class PerceptionWorker:
         mode = "passive"
         if self.command_confirmation and self.command_confirmation.has_pending:
             mode = "pointing"
+        elif is_dragging:
+            mode = "dragging"
+        elif gesture_labels:
+            mode = "active"
 
         # Batched object event (avoid per-detection bus spam)
         if result.detections:
@@ -156,7 +182,10 @@ class PerceptionWorker:
             detections=result.detections,
             pnp=pnp_list,
             hand_results=result.hand_results,
-            gestures=gestures,
+            gestures=gesture_labels,
+            actions=action_labels,
+            cursor=cursor,
+            is_dragging=is_dragging,
             mode=mode,
             fps=self._fps,
             timestamp=time.time(),
