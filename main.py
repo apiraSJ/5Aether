@@ -1,7 +1,17 @@
+"""
+Aether — CV Pipeline + Gesture Interaction
+
+Camera → GestureRecognizer → cursor on camera feed + fullscreen overlay
+Pinch = CLICK (both hands). Panels open via gestures.
+"""
+
+import sys
+import math
+import time
 import logging
 import threading
-import time
-import tkinter as tk
+import queue
+
 import numpy as np
 import cv2
 
@@ -11,105 +21,97 @@ except Exception:
     dpg = None
 
 from core.app import AetherApp
-from core.event_bus import EventType
+from core.event_bus import EventBus, EventType
 from core.frame_broker import FrameBroker
+from core.cursor_manager import CursorManager
 from perception.hand_plugin import HandPerceptionPlugin
 from perception.object_plugin import ObjectSpatialPlugin
+from memory.storage import MemoryStorage
+from context.context_manager import ContextManager
+from interface.cursor_overlay import CursorOverlay
 
 
 logger = logging.getLogger("Aether.Main")
 
-# ─── MediaPipe native gestures → commands ────────────────────────
-GESTURE_COMMAND_MAP = {
-    "Closed_Fist":  "Cancel / Close",
-    "Open_Palm":    "Toggle UI",
-    "Pointing_Up":  "Move Cursor",
-    "Thumb_Up":     "Confirm / Accept",
-    "Thumb_Down":   "Reject / Deny",
-    "Victory":      "Copy / Select",
-    "ILoveYou":     "Show Help",
-    "Unknown":      "",
-}
-
-# Cooldown: prevent popup spam for same gesture (seconds)
-_GESTURE_COOLDOWN = 1.5
-
-# ─── Global runtime state ────────────────────────────────────────
+# ─── Runtime state ───────────────────────────────────────────────
 runtime_hands = []
 runtime_objects = []
-runtime_cursor = (0.5, 0.5)
-runtime_gesture = None
-runtime_command = ""
-_last_popup_gesture = None
-_last_popup_time = 0.0
+runtime_cursor = None       # (x_norm, y_norm)
+runtime_pinch = False
+runtime_gesture = "Unknown"
 state_lock = threading.Lock()
 
-# ─── Command popup (thread-safe) ─────────────────────────────────
-_popup_queue = []
+# ─── Thread-safe action queue ────────────────────────────────────
+# Perception thread pushes actions here, main loop processes them
+_action_queue = queue.Queue()
+
+# ─── Config ──────────────────────────────────────────────────────
+PINCH_THRESHOLD = 0.06
+GESTURE_COOLDOWN = 1.2
+_last_gesture = None
+_last_gesture_time = 0.0
+_was_pinching = False
 
 
-def _show_command_popup(gesture_name, command_name):
-    _popup_queue.append((gesture_name, command_name))
-
-
-def _process_popups():
-    global _last_popup_gesture, _last_popup_time
-    while _popup_queue:
-        gesture_name, command_name = _popup_queue.pop(0)
-        now = time.time()
-        if gesture_name == _last_popup_gesture and (now - _last_popup_time) < _GESTURE_COOLDOWN:
-            continue
-        _last_popup_gesture = gesture_name
-        _last_popup_time = now
-        try:
-            _create_popup_window(gesture_name, command_name)
-        except Exception as e:
-            logger.error(f"Popup error: {e}")
-
-
-def _create_popup_window(gesture_name, command_name):
-    win = tk.Tk()
-    win.title("Aether Command")
-    win.geometry("350x220")
-    win.configure(bg="#1e1e2e")
-    win.attributes("-topmost", True)
-    win.resizable(False, False)
-
-    tk.Label(win, text="AETHER COMMAND", font=("Segoe UI", 14, "bold"),
-             fg="#00ffff", bg="#1e1e2e").pack(pady=(15, 5))
-
-    gesture_frame = tk.Frame(win, bg="#2a2a3e", highlightbackground="#444", highlightthickness=1)
-    gesture_frame.pack(padx=20, pady=5, fill="x")
-    tk.Label(gesture_frame, text="Gesture", font=("Segoe UI", 10), fg="#888", bg="#2a2a3e").pack(anchor="w", padx=10, pady=(5, 0))
-    tk.Label(gesture_frame, text=gesture_name, font=("Segoe UI", 16, "bold"), fg="#00ff88", bg="#2a2a3e").pack(anchor="w", padx=10, pady=(0, 5))
-
-    command_frame = tk.Frame(win, bg="#2a2a3e", highlightbackground="#444", highlightthickness=1)
-    command_frame.pack(padx=20, pady=5, fill="x")
-    tk.Label(command_frame, text="Command", font=("Segoe UI", 10), fg="#888", bg="#2a2a3e").pack(anchor="w", padx=10, pady=(5, 0))
-    tk.Label(command_frame, text=command_name, font=("Segoe UI", 14, "bold"), fg="#ffaa00", bg="#2a2a3e").pack(anchor="w", padx=10, pady=(0, 5))
-
-    tk.Button(win, text="OK", command=win.destroy, font=("Segoe UI", 11, "bold"),
-              bg="#3a3a5e", fg="white", activebackground="#5a5a8e", width=12, relief="flat").pack(pady=10)
-
-
-# ─── Bus event handlers ──────────────────────────────────────────
+# ─── Hand detection (checks ALL hands) ───────────────────────────
 def on_hand_update(event):
-    global runtime_hands, runtime_gesture, runtime_command, runtime_cursor
+    global runtime_hands, runtime_cursor, runtime_pinch, runtime_gesture
+    global _last_gesture, _last_gesture_time, _was_pinching
+
+    hands = event.data.get("hands", [])
+
     with state_lock:
-        runtime_hands = event.data.get("hands", [])
-        if runtime_hands:
-            top = runtime_hands[0]
-            runtime_gesture = top.get("gesture", "Unknown")
-            cmd = GESTURE_COMMAND_MAP.get(runtime_gesture, "")
-            runtime_command = cmd
-            if runtime_gesture not in ("Unknown", "") and cmd:
-                _show_command_popup(runtime_gesture, cmd)
-            pts = top.get("landmarks", [])
-            if pts and len(pts) > 8:
-                runtime_cursor = (pts[8]["x"], pts[8]["y"])
-        else:
-            runtime_gesture = None
-            runtime_command = ""
+        runtime_hands = hands
+
+        if not hands:
+            runtime_cursor = None
+            runtime_pinch = False
+            runtime_gesture = "Unknown"
+            _was_pinching = False
+            return
+
+        # ── Check ALL hands for pinch + cursor ───────────────────
+        any_pinching = False
+        best_cursor = None
+        best_gesture = "Unknown"
+
+        for hand in hands:
+            lm = hand.get("landmarks", [])
+            if not lm or len(lm) < 21:
+                continue
+
+            idx = lm[8]
+            thumb = lm[4]
+            dx = idx["x"] - thumb["x"]
+            dy = idx["y"] - thumb["y"]
+            dist = math.sqrt(dx * dx + dy * dy)
+            is_pinch = dist < PINCH_THRESHOLD
+
+            if is_pinch:
+                any_pinching = True
+
+            if best_cursor is None:
+                best_cursor = (idx["x"], idx["y"])
+                best_gesture = hand.get("gesture", "Unknown")
+
+        runtime_pinch = any_pinching
+        runtime_cursor = best_cursor
+        runtime_gesture = best_gesture
+
+        # ── Gesture → action (queued to main thread) ─────────────
+        now = time.time()
+        gesture = best_gesture
+        cooldown_ok = (gesture != _last_gesture) or (now - _last_gesture_time) > GESTURE_COOLDOWN
+
+        if gesture != "Unknown" and gesture != "Pointing_Up" and cooldown_ok:
+            _action_queue.put(("gesture", gesture))
+            _last_gesture = gesture
+            _last_gesture_time = now
+
+        # ── Pinch = CLICK (any hand, edge-triggered) ─────────────
+        if any_pinching and not _was_pinching:
+            _action_queue.put(("pinch_click", runtime_cursor))
+        _was_pinching = any_pinching
 
 
 def on_object_update(event):
@@ -136,6 +138,102 @@ def camera_producer(broker, device_index=0, width=640, height=480):
     cap.release()
 
 
+# ─── Process queued actions on main thread ────────────────────────
+def process_action_queue(cursor_mgr, ui, qapp):
+    """Called from main loop — processes gesture actions on the Qt thread."""
+    while not _action_queue.empty():
+        try:
+            action_type, data = _action_queue.get_nowait()
+        except queue.Empty:
+            break
+
+        if action_type == "gesture":
+            _handle_gesture_action(data, ui)
+        elif action_type == "pinch_click":
+            _handle_pinch_click(data, ui)
+
+
+def _handle_gesture_action(gesture, ui):
+    """Execute gesture action on the main thread (safe for Qt)."""
+    if gesture == "Open_Palm":
+        ui.show()
+        ui.raise_()
+        ui.activateWindow()
+        ui.show_panel("system")
+        logger.info("Gesture: Open_Palm → show system panel")
+    elif gesture == "Victory":
+        ui.show()
+        ui.raise_()
+        ui.show_panel("developer")
+        logger.info("Gesture: Victory → show developer panel")
+    elif gesture == "ILoveYou":
+        ui.show()
+        ui.raise_()
+        ui.show_panel("settings")
+        logger.info("Gesture: ILoveYou → show settings panel")
+    elif gesture == "Closed_Fist":
+        ui.hide()
+        logger.info("Gesture: Closed_Fist → hide UI")
+    elif gesture == "Thumb_Up":
+        ui.set_mode("normal")
+        logger.info("Gesture: Thumb_Up → normal mode")
+    elif gesture == "Thumb_Down":
+        ui.set_mode("developer")
+        logger.info("Gesture: Thumb_Down → developer mode")
+
+
+def _handle_pinch_click(cursor, ui):
+    """Pinch = CLICK. Log it, could trigger button press."""
+    logger.info(f"Pinch CLICK at {cursor}")
+
+
+# ─── Draw cursor on camera frame ─────────────────────────────────
+def draw_cursor_on_frame(frame, cx_norm, cy_norm, is_pinch, gesture):
+    h, w = frame.shape[:2]
+    cx = int((1.0 - cx_norm) * w)
+    cy = int(cy_norm * h)
+    cx = max(0, min(w - 1, cx))
+    cy = max(0, min(h - 1, cy))
+
+    if is_pinch:
+        color = (0, 0, 255)
+        glow_alpha = 0.8
+        label_text = "CLICK"
+    else:
+        color = (0, 255, 200)
+        glow_alpha = 0.4
+        label_text = gesture.replace("_", " ") if gesture and gesture != "Unknown" else ""
+
+    overlay = frame.copy()
+    cv2.circle(overlay, (cx, cy), 28, color, -1)
+    cv2.addWeighted(overlay, glow_alpha, frame, 1 - glow_alpha, 0, frame)
+    cv2.circle(frame, (cx, cy), 20, color, 2, cv2.LINE_AA)
+    cv2.circle(frame, (cx, cy), 4, (255, 255, 255), -1, cv2.LINE_AA)
+
+    ch = 10
+    cv2.line(frame, (cx - ch, cy), (cx - 6, cy), color, 1, cv2.LINE_AA)
+    cv2.line(frame, (cx + 6, cy), (cx + ch, cy), color, 1, cv2.LINE_AA)
+    cv2.line(frame, (cx, cy - ch), (cx, cy - 6), color, 1, cv2.LINE_AA)
+    cv2.line(frame, (cx, cy + 6), (cx, cy + ch), color, 1, cv2.LINE_AA)
+
+    if label_text:
+        cv2.putText(frame, label_text, (cx + 26, cy + 5),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+
+
+def draw_pinch_line(frame, lm, is_pinch):
+    if not is_pinch or not lm or len(lm) < 21:
+        return
+    h, w = frame.shape[:2]
+    idx = lm[8]
+    thumb = lm[4]
+    p1 = (int((1.0 - idx["x"]) * w), int(idx["y"] * h))
+    p2 = (int((1.0 - thumb["x"]) * w), int(thumb["y"] * h))
+    cv2.line(frame, p1, p2, (0, 0, 255), 2, cv2.LINE_AA)
+    cv2.circle(frame, p1, 6, (0, 0, 255), -1, cv2.LINE_AA)
+    cv2.circle(frame, p2, 6, (0, 0, 255), -1, cv2.LINE_AA)
+
+
 # ─── HUD drawing ─────────────────────────────────────────────────
 def process_hud_overlays(frame, hands, objects):
     h, w = frame.shape[:2]
@@ -143,8 +241,9 @@ def process_hud_overlays(frame, hands, objects):
     for obj in objects:
         x1, y1, x2, y2 = obj["box"]
         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
-        lbl = f"{obj['name']} ({obj['conf']:.2f}) {obj['distance_z']:.1f}m"
-        cv2.putText(frame, lbl, (x1, max(y1 - 10, 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+        lbl = f"{obj['name']} ({obj['conf']:.2f}) {obj.get('distance_z', 0):.1f}m"
+        cv2.putText(frame, lbl, (x1, max(y1 - 10, 20)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
 
     connections = [
         (0, 1), (1, 2), (2, 3), (3, 4),
@@ -154,14 +253,30 @@ def process_hud_overlays(frame, hands, objects):
         (13, 17), (17, 18), (18, 19), (19, 20),
         (0, 17),
     ]
+
     for hand in hands:
-        pts = np.array([[int(lm["x"] * w), int(lm["y"] * h)] for lm in hand["landmarks"]])
-        for pt in pts:
-            cv2.circle(frame, tuple(pt), 4, (0, 255, 0), -1)
+        lm = hand.get("landmarks", [])
+        if not lm or len(lm) < 21:
+            continue
+
+        pts = np.array([[int((1.0 - l["x"]) * w), int(l["y"] * h)] for l in lm])
+
         for a, b in connections:
-            if a < len(pts) and b < len(pts):
-                cv2.line(frame, tuple(pts[a]), tuple(pts[b]), (255, 0, 0), 1)
-        cv2.putText(frame, hand["label"], tuple(pts[0]), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+            cv2.line(frame, tuple(pts[a]), tuple(pts[b]), (255, 180, 0), 1, cv2.LINE_AA)
+
+        for i, pt in enumerate(pts):
+            radius = 5 if i in (4, 8, 12, 16, 20) else 3
+            cv2.circle(frame, tuple(pt), radius, (0, 255, 0), -1, cv2.LINE_AA)
+
+        idx = lm[8]
+        thumb = lm[4]
+        dx = idx["x"] - thumb["x"]
+        dy = idx["y"] - thumb["y"]
+        hand_pinch = math.sqrt(dx * dx + dy * dy) < PINCH_THRESHOLD
+        draw_pinch_line(frame, lm, hand_pinch)
+
+        cv2.putText(frame, hand.get("label", ""), tuple(pts[0]),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
 
     return frame
 
@@ -174,24 +289,46 @@ def main():
     )
     logger.info("Starting Aether...")
 
+    # ── PySide6 QApplication ─────────────────────────────────────
+    from PySide6.QtWidgets import QApplication
+    qapp = QApplication.instance() or QApplication(sys.argv)
+    qapp.setQuitOnLastWindowClosed(False)
+
+    # ── Core app ─────────────────────────────────────────────────
     app = AetherApp("config/desktop.yaml")
     app.initialize()
-
     bus = app.event_bus
     broker = FrameBroker()
 
+    # ── Memory + Context ─────────────────────────────────────────
+    memory = MemoryStorage()
+    context = ContextManager()
+
+    # ── Cursor manager + fullscreen overlay ──────────────────────
+    cursor_manager = CursorManager()
+    cursor_overlay = CursorOverlay(cursor_manager)
+    cursor_overlay.show()
+
+    # ── PySide6 panels ──────────────────────────────────────────
+    from interface.ui import AetherUI, create_system_panel, create_developer_panel, create_settings_panel
+
+    ui = AetherUI(context_manager=context, memory_storage=memory)
+    ui.register_panel("system", "SYSTEM", create_system_panel(context))
+    ui.register_panel("developer", "DEVELOPER", create_developer_panel())
+    ui.register_panel("settings", "SETTINGS", create_settings_panel(memory))
+
+    # ── Subscribe to perception ──────────────────────────────────
     bus.subscribe(EventType.HAND_DETECTED, on_hand_update)
     bus.subscribe(EventType.OBJECT_DETECTED, on_object_update)
 
+    # ── Start perception ─────────────────────────────────────────
     cam_config = app.settings.get("camera") or {}
     hand_config = app.settings.get("hand_tracking") or {}
     model_config = app.settings.get("model") or {}
-
     model_path = hand_config.get("model_path", "models/gesture_recognizer.task")
 
     hand_worker = HandPerceptionPlugin(broker, bus, model_path, hand_config)
     obj_worker = ObjectSpatialPlugin(broker, bus, model_config.get("weights", "yolov8n.pt"), model_config)
-
     hand_worker.start()
     obj_worker.start()
 
@@ -202,7 +339,7 @@ def main():
     )
     cam_thread.start()
 
-    # 3. DearPyGui UI
+    # ── DearPyGui dashboard ──────────────────────────────────────
     use_dpg = True
     try:
         dpg.create_context()
@@ -228,16 +365,20 @@ def main():
                     dpg.add_separator()
                     dpg.add_text("Gesture", color=[0, 255, 255])
                     dpg.add_text("None", tag="gesture_display")
-                    dpg.add_text("Command", color=[0, 255, 255])
-                    dpg.add_text("None", tag="command_display")
+                    dpg.add_separator()
+                    dpg.add_text("Cursor", color=[0, 255, 255])
+                    dpg.add_text("No hand", tag="cursor_pos")
+                    dpg.add_text("Pinch: No", tag="pinch_status")
 
         dpg.setup_dearpygui()
         dpg.show_viewport()
         logger.info("Dashboard ready.")
 
-        # 4. Render loop
+        # ── Render loop ──────────────────────────────────────────
         while dpg.is_dearpygui_running():
-            _process_popups()
+            # Process Qt events + gesture actions on main thread
+            qapp.processEvents()
+            process_action_queue(cursor_manager, ui, qapp)
 
             raw_frame = broker.get_frame()
             if raw_frame is not None:
@@ -245,29 +386,36 @@ def main():
                     current_hands = list(runtime_hands)
                     current_objects = list(runtime_objects)
                     current_cursor = runtime_cursor
+                    current_pinch = runtime_pinch
                     current_gesture = runtime_gesture
-                    current_command = runtime_command
 
+                # Update cursor overlay (fullscreen)
+                if current_cursor:
+                    cursor_manager.update(
+                        hand_x=current_cursor[0],
+                        hand_y=current_cursor[1],
+                        gesture=current_gesture,
+                        is_pinch=current_pinch,
+                    )
+                else:
+                    cursor_manager.hide()
+
+                # Draw camera frame
                 processed = process_hud_overlays(raw_frame.copy(), current_hands, current_objects)
+                if current_cursor:
+                    draw_cursor_on_frame(processed, current_cursor[0], current_cursor[1],
+                                         current_pinch, current_gesture)
 
                 h, w = processed.shape[:2]
-                cx = max(0, min(w - 1, int(current_cursor[0] * w)))
-                cy = max(0, min(h - 1, int(current_cursor[1] * h)))
-                cv2.line(processed, (cx - 12, cy), (cx + 12, cy), (0, 255, 255), 2)
-                cv2.line(processed, (cx, cy - 12), (cx, cy + 12), (0, 255, 255), 2)
-                cv2.circle(processed, (cx, cy), 16, (0, 255, 255), 1)
-                cv2.circle(processed, (cx, cy), 2, (0, 0, 255), -1)
-
-                if current_gesture and current_gesture != "Unknown":
-                    cv2.putText(processed, f"{current_gesture} -> {current_command}", (10, h - 16),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-
-                mode_text = "ACTIVE" if current_gesture and current_gesture != "Unknown" else "PASSIVE"
-                mode_color = (0, 255, 0) if mode_text == "ACTIVE" else (100, 100, 100)
-                cv2.putText(processed, f"Mode: {mode_text}", (w - 200, h - 28),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, mode_color, 1)
-                cv2.putText(processed, f"Hands: {len(current_hands)}", (w - 200, h - 6),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+                gesture_text = current_gesture if current_gesture != "Unknown" else "None"
+                cv2.putText(processed, f"Gesture: {gesture_text}", (10, h - 36),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1, cv2.LINE_AA)
+                pinch_text = "CLICK" if current_pinch else "No"
+                pinch_color = (0, 0, 255) if current_pinch else (200, 200, 200)
+                cv2.putText(processed, f"Pinch: {pinch_text}", (10, h - 14),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, pinch_color, 1, cv2.LINE_AA)
+                cv2.putText(processed, f"Hands: {len(current_hands)}", (w - 150, h - 14),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1, cv2.LINE_AA)
 
                 rgba = cv2.cvtColor(processed, cv2.COLOR_BGR2RGBA)
                 float_texture = np.ascontiguousarray(rgba, dtype=np.float32) / 255.0
@@ -278,9 +426,11 @@ def main():
                 if dpg.does_item_exist("hand_count"):
                     dpg.set_value("hand_count", f"Hands: {len(current_hands)}")
                 if dpg.does_item_exist("gesture_display"):
-                    dpg.set_value("gesture_display", current_gesture or "None")
-                if dpg.does_item_exist("command_display"):
-                    dpg.set_value("command_display", current_command or "None")
+                    dpg.set_value("gesture_display", gesture_text)
+                if dpg.does_item_exist("cursor_pos"):
+                    dpg.set_value("cursor_pos", f"({current_cursor[0]:.2f}, {current_cursor[1]:.2f})" if current_cursor else "No hand")
+                if dpg.does_item_exist("pinch_status"):
+                    dpg.set_value("pinch_status", pinch_text)
 
             dpg.render_dearpygui_frame()
 
@@ -294,6 +444,7 @@ def main():
         except Exception:
             pass
 
+    # ── OpenCV fallback ──────────────────────────────────────────
     if not use_dpg:
         logger.info("Using OpenCV window. Press 'q' to exit.")
         try:
@@ -307,24 +458,25 @@ def main():
                     current_hands = list(runtime_hands)
                     current_objects = list(runtime_objects)
                     current_cursor = runtime_cursor
+                    current_pinch = runtime_pinch
                     current_gesture = runtime_gesture
-                    current_command = runtime_command
+
+                # Update cursor overlay
+                if current_cursor:
+                    cursor_manager.update(
+                        hand_x=current_cursor[0], hand_y=current_cursor[1],
+                        gesture=current_gesture, is_pinch=current_pinch,
+                    )
+                else:
+                    cursor_manager.hide()
 
                 processed = process_hud_overlays(raw_frame.copy(), current_hands, current_objects)
-                h, w = processed.shape[:2]
-                cx = max(0, min(w - 1, int(current_cursor[0] * w)))
-                cy = max(0, min(h - 1, int(current_cursor[1] * h)))
-                cv2.line(processed, (cx - 12, cy), (cx + 12, cy), (0, 255, 255), 2)
-                cv2.line(processed, (cx, cy - 12), (cx, cy + 12), (0, 255, 255), 2)
-                cv2.circle(processed, (cx, cy), 16, (0, 255, 255), 1)
-
-                if current_gesture and current_gesture != "Unknown":
-                    cv2.putText(processed, f"{current_gesture} -> {current_command}", (10, h - 16),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                if current_cursor:
+                    draw_cursor_on_frame(processed, current_cursor[0], current_cursor[1],
+                                         current_pinch, current_gesture)
 
                 cv2.putText(processed, "Press 'q' to exit", (10, 30),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
-
                 cv2.imshow("Aether", processed)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
@@ -333,6 +485,7 @@ def main():
         finally:
             cv2.destroyAllWindows()
 
+    # ── Shutdown ─────────────────────────────────────────────────
     hand_worker.stop()
     obj_worker.stop()
     app.plugin_manager.shutdown_all()

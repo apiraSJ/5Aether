@@ -64,6 +64,11 @@ class EventType(Enum):
     MEMORY_STORE = "memory_store"
     MEMORY_RECALL = "memory_recall"
     
+    # Menu
+    MENU_OPEN = "menu_open"
+    MENU_CLOSE = "menu_close"
+    MENU_ITEM_SELECTED = "menu_item_selected"
+
     # Status
     STATUS_REQUESTED = "status_requested"
 

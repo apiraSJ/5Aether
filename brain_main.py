@@ -1,40 +1,43 @@
 #!/usr/bin/env python3
 """
-Aether Brain - Core System Entry Point
+Aether Brain V1 — Interactive Spatial Assistant
 
-This is the brain without eyes. It runs the core system:
-- Event bus (nervous system)
-- Command system
-- Memory
-- Context engine
-- Smart UI (PySide6)
-- Hotkey listener
+Entry point: python brain_main.py
 
-No camera, no computer vision - just the intelligent foundation.
+Architecture:
+  Gesture → EventBus → UIManager → CursorOverlay + HomeMenu
 """
 
 import sys
+import math
+import time
 import logging
 import signal
-import threading
 
 from core.engine import AetherEngine, create_engine
 from core.event_bus import EventBus, EventType
-from command.command import Command, CommandRegistry, create_default_registry
+from core.cursor_manager import CursorManager
+from command.command import Command
 from command.handler import CommandHandler
 from memory.storage import MemoryStorage
 from context.context_manager import ContextManager
 from interface.ui import AetherUI, create_system_panel, create_developer_panel, create_settings_panel
+from interface.ui_manager import UIManager
 
 
-# Global references for signal handling
+# ── Globals ──────────────────────────────────────────────────────
 _engine = None
 _ui = None
 _hotkey_listener = None
+_ui_manager = None
+_command_handler = None
+_last_gesture = None
+_last_gesture_time = 0.0
+GESTURE_COOLDOWN = 1.5
+_was_pinching = False
 
 
 def setup_logging():
-    """Configure logging."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
@@ -46,119 +49,189 @@ def setup_logging():
 
 
 def create_brain(config: dict = None) -> AetherEngine:
-    """Create and wire up the complete Aether brain."""
-    global _engine, _ui
-    
-    # Default config
+    global _engine, _ui, _ui_manager, _command_handler
+
     if config is None:
-        config = {
-            "modules": {}
-        }
-    
-    # Create engine
+        config = {"modules": {}}
+
     engine = create_engine(config)
     _engine = engine
-    
-    # Create core services
-    event_bus = engine.event_bus
+    bus = engine.event_bus
+
     memory = MemoryStorage()
     context = ContextManager()
-    command_handler = CommandHandler(event_bus)
-    
-    # Create UI
-    app = sys.modules.get('PySide6.QtWidgets.QApplication')
-    if not app:
-        from PySide6.QtWidgets import QApplication
-        app = QApplication.instance() or QApplication(sys.argv)
-        app.setQuitOnLastWindowClosed(False)
-    
+    command_handler = CommandHandler(bus)
+    _command_handler = command_handler
+
+    # ── PySide6 App ──────────────────────────────────────────────
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
+
+    # ── UI panels ────────────────────────────────────────────────
     ui = AetherUI(context_manager=context, memory_storage=memory)
     _ui = ui
-    
-    # Register UI panels
     ui.register_panel("system", "SYSTEM", create_system_panel(context))
     ui.register_panel("developer", "DEVELOPER", create_developer_panel())
     ui.register_panel("settings", "SETTINGS", create_settings_panel(memory))
-    
-    # Show system panel by default
     ui.show_panel("system")
-    
-    # Wire up event handlers
-    _wire_events(engine, ui, command_handler, context, memory)
-    
-    # Load saved mode
+
+    # ── UIManager (owns cursor overlay + home menu) ─────────────
+    cursor_manager = CursorManager()
+    _ui_manager = UIManager(cursor_manager, bus)
+    _ui_manager.show()
+
+    # ── Wire events ──────────────────────────────────────────────
+    _wire_events(engine, ui, command_handler, context, memory, bus)
+
     saved_mode = memory.get("mode", "normal")
     ui.set_mode(saved_mode)
     context.set_mode(saved_mode)
-    
+
     return engine
 
 
-def _wire_events(engine, ui, command_handler, context, memory):
-    """Connect all event handlers."""
-    event_bus = engine.event_bus
-    
+def _wire_events(engine, ui, command_handler, context, memory, bus):
     # UI events
     def on_ui_open(event):
         ui.show()
         ui.raise_()
         ui.activateWindow()
         ui.show_panel("system")
-    
+
     def on_ui_close(event):
         ui.hide()
-    
+        _ui_manager.home_menu.hide_menu()
+
     def on_panel_show(event):
-        panel = event.data.get("panel", "system")
-        ui.show_panel(panel)
-    
+        ui.show_panel(event.data.get("panel", "system"))
+
     def on_panel_hide(event):
-        panel = event.data.get("panel", "system")
-        ui.hide_panel(panel)
-    
+        ui.hide_panel(event.data.get("panel", "system"))
+
     def on_mode_change(event):
         mode = event.data.get("mode", "normal")
         ui.set_mode(mode)
         context.set_mode(mode)
         memory.set("mode", mode)
-    
-    event_bus.subscribe(EventType.UI_OPEN, on_ui_open)
-    event_bus.subscribe(EventType.UI_CLOSE, on_ui_close)
-    event_bus.subscribe(EventType.PANEL_SHOW_REQUESTED, on_panel_show)
-    event_bus.subscribe(EventType.PANEL_HIDE_REQUESTED, on_panel_hide)
-    event_bus.subscribe(EventType.MODE_CHANGED, on_mode_change)
-    
-    # Command execution from events
+
+    bus.subscribe(EventType.UI_OPEN, on_ui_open)
+    bus.subscribe(EventType.UI_CLOSE, on_ui_close)
+    bus.subscribe(EventType.PANEL_SHOW_REQUESTED, on_panel_show)
+    bus.subscribe(EventType.PANEL_HIDE_REQUESTED, on_panel_hide)
+    bus.subscribe(EventType.MODE_CHANGED, on_mode_change)
+
+    # Command execution
     def on_command_event(event):
         cmd_data = event.data.get("command")
         if cmd_data:
             cmd = Command(**cmd_data)
             command_handler.execute(cmd)
-    
-    event_bus.subscribe(EventType.COMMAND_EXECUTE, on_command_event)
-    
-    # Context updates
+
+    bus.subscribe(EventType.COMMAND_EXECUTE, on_command_event)
+
+    # Context
     def on_context_update(event):
         context.update(**event.data)
-    
-    event_bus.subscribe(EventType.CONTEXT_CHANGED, on_context_update)
-    event_bus.subscribe(EventType.CONTEXT_APP_CHANGED, on_context_update)
-    
-    # Keyboard/hotkey events
+
+    bus.subscribe(EventType.CONTEXT_CHANGED, on_context_update)
+    bus.subscribe(EventType.CONTEXT_APP_CHANGED, on_context_update)
+
+    # Keyboard
     def on_hotkey(event):
         key = event.data.get("key", "").lower()
-        source = event.data.get("source", "keyboard")
-        
-        _handle_hotkey(key, source, command_handler)
-    
-    event_bus.subscribe(EventType.INPUT_HOTKEY, on_hotkey)
+        _handle_hotkey(key, event.data.get("source", "keyboard"), command_handler)
+
+    bus.subscribe(EventType.INPUT_HOTKEY, on_hotkey)
+
+    # ── HAND_DETECTED → cursor + gesture actions ─────────────────
+    def on_hand_detected(event):
+        global _was_pinching, _last_gesture, _last_gesture_time
+
+        hands = event.data.get("hands", [])
+        if not hands:
+            _ui_manager.cursor_manager.hide()
+            if _ui_manager.home_menu.is_visible:
+                bus.emit_simple(EventType.MENU_CLOSE, {})
+            _was_pinching = False
+            return
+
+        hand = hands[0]
+        lm = hand.get("landmarks", [])
+        gesture = hand.get("gesture", "Unknown")
+        gesture_score = hand.get("gesture_score", 0.0)
+
+        if not lm or len(lm) < 21:
+            _ui_manager.cursor_manager.hide()
+            return
+
+        idx_tip = lm[8]
+        thumb_tip = lm[4]
+
+        # Pinch
+        dx = thumb_tip["x"] - idx_tip["x"]
+        dy = thumb_tip["y"] - idx_tip["y"]
+        pinch = math.sqrt(dx * dx + dy * dy) < 0.04
+
+        # Update cursor via UIManager
+        _ui_manager.update_cursor(
+            hand_x=idx_tip["x"],
+            hand_y=idx_tip["y"],
+            gesture=gesture,
+            gesture_score=gesture_score,
+            is_pinch=pinch,
+        )
+
+        # Gesture → Action
+        now = time.time()
+        cooldown_ok = (gesture != _last_gesture) or (now - _last_gesture_time) > GESTURE_COOLDOWN
+
+        if gesture == "Open_Palm" and cooldown_ok:
+            if _ui_manager.home_menu.is_visible:
+                bus.emit_simple(EventType.MENU_OPEN, {})
+            else:
+                bus.emit_simple(EventType.UI_OPEN, {})
+            _last_gesture = gesture
+            _last_gesture_time = now
+
+        elif gesture == "Closed_Fist" and cooldown_ok:
+            bus.emit_simple(EventType.MENU_CLOSE, {})
+            bus.emit_simple(EventType.UI_CLOSE, {})
+            _last_gesture = gesture
+            _last_gesture_time = now
+
+        elif gesture == "Victory" and cooldown_ok:
+            bus.emit_simple(EventType.PANEL_SHOW_REQUESTED, {"panel": "developer"})
+            _last_gesture = gesture
+            _last_gesture_time = now
+
+        elif gesture == "ILoveYou" and cooldown_ok:
+            bus.emit_simple(EventType.PANEL_SHOW_REQUESTED, {"panel": "settings"})
+            _last_gesture = gesture
+            _last_gesture_time = now
+
+        elif gesture == "Thumb_Up" and cooldown_ok:
+            bus.emit_simple(EventType.MODE_CHANGED, {"mode": "normal"})
+            _last_gesture = gesture
+            _last_gesture_time = now
+
+        elif gesture == "Thumb_Down" and cooldown_ok:
+            bus.emit_simple(EventType.MODE_CHANGED, {"mode": "developer"})
+            _last_gesture = gesture
+            _last_gesture_time = now
+
+        # Pinch → Click
+        if pinch and not _was_pinching:
+            action = _ui_manager.handle_pinch_click()
+            if action:
+                logging.getLogger("Aether.Main").info(f"Pinch click: {action}")
+        _was_pinching = pinch
+
+    bus.subscribe(EventType.HAND_DETECTED, on_hand_detected)
 
 
 def _handle_hotkey(key: str, source: str, command_handler: CommandHandler):
-    """Map hotkeys to commands."""
     key = key.lower().replace("ctrl+", "").replace("control+", "").strip()
-    
-    # Map hotkeys to commands
     hotkey_map = {
         "space": Command(name="open_ui", source=source, params={"panel": "system"}),
         "escape": Command(name="close_ui", source=source),
@@ -169,19 +242,15 @@ def _handle_hotkey(key: str, source: str, command_handler: CommandHandler):
         "m": Command(name="set_mode", source=source, params={"mode": "normal"}),
         "p": Command(name="set_mode", source=source, params={"mode": "presentation"}),
     }
-    
     cmd = hotkey_map.get(key)
     if cmd:
         command_handler.execute(cmd)
 
 
 def start_hotkey_listener(event_bus):
-    """Start global hotkey listener in background thread."""
     from pynput import keyboard
-    
     def on_press(key):
         try:
-            # Handle special keys
             if hasattr(key, 'char') and key.char:
                 k = key.char
             elif key == keyboard.Key.space:
@@ -192,99 +261,52 @@ def start_hotkey_listener(event_bus):
                 k = "tab"
             else:
                 return
-            
             event_bus.emit_simple(EventType.INPUT_HOTKEY, {"key": k, "source": "keyboard"})
-        except Exception as e:
-            logging.getLogger("Aether.Hotkeys").debug(f"Hotkey error: {e}")
-    
+        except Exception:
+            pass
     listener = keyboard.Listener(on_press=on_press)
     listener.daemon = True
     listener.start()
     return listener
 
 
-def start_gesture_bridge(event_bus):
-    """Start gesture input bridge — listens for gesture events on the bus
-    and translates them to the same command path as keyboard hotkeys.
-    This allows gesture input in the brain-only (no camera) path when
-    hand data arrives via network or other means."""
-    from vision.gesture_engine import GestureEngine
-    from vision.gesture_executor import GestureActionExecutor
-
-    engine = GestureEngine()
-    executor = GestureActionExecutor(event_bus, engine)
-
-    def on_hand_data(event):
-        """Receive hand landmark data and run gesture recognition."""
-        hand_results = event.data.get("hand_results")
-        if hand_results:
-            gesture_events = engine.update(hand_results)
-            executor.process_events(gesture_events)
-
-    event_bus.subscribe(EventType.HAND_DETECTED, on_hand_data)
-    return executor
-
-
 def signal_handler(sig, frame):
-    """Handle shutdown signals."""
-    logging.getLogger("Aether.Main").info("Shutdown signal received")
     if _engine:
         _engine.shutdown()
     sys.exit(0)
 
 
 def main():
-    """Main entry point - starts the Aether brain."""
     setup_logging()
     logger = logging.getLogger("Aether.Main")
-    
     logger.info("=" * 50)
-    logger.info("AETHER BRAIN STARTING")
+    logger.info("AETHER BRAIN V1 — Interactive Spatial Assistant")
     logger.info("=" * 50)
-    
-    # Setup signal handlers
+
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
-    
-    # Create the brain
+
     engine = create_brain()
-    
-    # Initialize and start
     if not engine.initialize():
         logger.error("Failed to initialize engine")
         return 1
-    
     if not engine.start():
         logger.error("Failed to start engine")
         return 1
-    
-    # Start hotkey listener
+
     global _hotkey_listener
     _hotkey_listener = start_hotkey_listener(engine.event_bus)
-    
-    # Start gesture bridge (for network-received hand data)
-    gesture_executor = start_gesture_bridge(engine.event_bus)
-    
-    logger.info("Aether Brain is running!")
-    logger.info("Hotkeys:")
-    logger.info("  CTRL+SPACE  - Open UI")
-    logger.info("  ESC         - Close UI")
-    logger.info("  CTRL+1/2/3  - Switch panels (System/Dev/Settings)")
-    logger.info("  CTRL+TAB    - Developer mode")
-    logger.info("  CTRL+M      - Normal mode")
-    logger.info("  CTRL+P      - Presentation mode")
-    logger.info("Gestures (via camera/network):")
-    logger.info("  Open Palm   - Toggle UI")
-    logger.info("  Point       - Move cursor")
-    logger.info("  Pinch       - Click/select")
-    logger.info("  Fist        - Cancel")
-    logger.info("  Peace       - Next panel")
-    logger.info("  Swipe L/R   - Navigate panels")
-    logger.info("  Swipe U/D   - Scroll")
-    logger.info("  Grab        - Drag window")
-    logger.info("  Thumbs Up   - Confirm")
-    
-    # Run the Qt event loop
+
+    logger.info("Gestures:")
+    logger.info("  Open Palm   → Toggle Home Menu")
+    logger.info("  Point       → Move cursor")
+    logger.info("  Pinch       → Click menu button")
+    logger.info("  Fist        → Close / Cancel")
+    logger.info("  Thumb Up    → Normal mode")
+    logger.info("  Thumb Down  → Developer mode")
+    logger.info("  Victory     → Developer panel")
+    logger.info("  ILY         → Settings panel")
+
     from PySide6.QtWidgets import QApplication
     app = QApplication.instance()
     return app.exec()
