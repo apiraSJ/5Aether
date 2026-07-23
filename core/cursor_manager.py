@@ -1,8 +1,15 @@
 """
-Cursor Manager — Virtual cursor with proper ratio mapping
+Cursor Manager — Virtual cursor with adaptive smoothing & velocity prediction
 
 Maps camera coordinates (4:3) to screen (16:9) preserving aspect ratio.
 Uses "contain" mode — cursor stays within bounds, no stretching.
+
+Key improvements over v1:
+- Adaptive smoothing: fast movement = responsive, slow movement = stable
+- Velocity prediction: reduces perceived lag
+- Proper dead zone: larger when moving fast, smaller when slow
+- Screen edge clamping: cursor stays on-screen
+- Sensitivity multiplier: like mouse DPI
 """
 
 import time
@@ -31,7 +38,7 @@ class CursorState:
 
 
 class CursorManager:
-    """Manages virtual cursor with proper camera→screen ratio mapping."""
+    """Manages virtual cursor with adaptive smoothing and velocity prediction."""
 
     def __init__(
         self,
@@ -39,47 +46,49 @@ class CursorManager:
         screen_height: int = 1080,
         camera_width: int = 640,
         camera_height: int = 480,
-        smoothing: float = 0.35,
-        dead_zone: float = 0.5,
+        smoothing: float = 0.25,
+        dead_zone: float = 2.0,
         mirror_x: bool = True,
+        sensitivity: float = 1.0,
+        prediction: float = 0.08,
     ):
         self.screen_width = screen_width
         self.screen_height = screen_height
         self.camera_width = camera_width
         self.camera_height = camera_height
-        self.smoothing = smoothing
-        self.dead_zone = dead_zone
+        self.base_smoothing = smoothing
+        self.base_dead_zone = dead_zone
         self.mirror_x = mirror_x
+        self.sensitivity = sensitivity
+        self.prediction = prediction
         self.logger = logging.getLogger("Aether.CursorManager")
 
         # Precompute ratio mapping
         self._compute_ratio()
 
         self._state = CursorState()
+        self._smooth_x = 0.0
+        self._smooth_y = 0.0
         self._prev_x = 0.0
         self._prev_y = 0.0
         self._prev_time = time.time()
         self._initialized = False
-        self.logger = logging.getLogger("Aether.CursorManager")
 
     def _compute_ratio(self):
         """Compute contain-mode mapping from camera to screen.
-        
+
         Camera (4:3) → Screen (16:9):
         - Fit camera frame inside screen preserving aspect ratio
         - Map normalized camera coords to screen coords within that region
         """
-        cam_aspect = self.camera_width / self.camera_height   # 4/3 = 1.333
-        scr_aspect = self.screen_width / self.screen_height   # 16/9 = 1.778
+        cam_aspect = self.camera_width / self.camera_height
+        scr_aspect = self.screen_width / self.screen_height
 
         if cam_aspect > scr_aspect:
-            # Camera wider than screen — fit to width
             self._scale = self.screen_width / self.camera_width
         else:
-            # Camera taller than screen — fit to height
             self._scale = self.screen_height / self.camera_height
 
-        # Offset to center the mapped region
         mapped_w = self.camera_width * self._scale
         mapped_h = self.camera_height * self._scale
         self._offset_x = (self.screen_width - mapped_w) / 2.0
@@ -93,15 +102,19 @@ class CursorManager:
 
     def camera_to_screen(self, norm_x: float, norm_y: float) -> Tuple[float, float]:
         """Map normalized camera coords [0,1] to screen pixels."""
-        # Mirror X if needed
         x = (1.0 - norm_x) if self.mirror_x else norm_x
         y = norm_y
 
-        # Map through ratio
         screen_x = x * self.camera_width * self._scale + self._offset_x
         screen_y = y * self.camera_height * self._scale + self._offset_y
 
         return (screen_x, screen_y)
+
+    def _clamp_to_screen(self, x: float, y: float) -> Tuple[float, float]:
+        """Clamp cursor position to screen bounds."""
+        x = max(0.0, min(float(self.screen_width - 1), x))
+        y = max(0.0, min(float(self.screen_height - 1), y))
+        return (x, y)
 
     def update(
         self,
@@ -112,7 +125,10 @@ class CursorManager:
         is_pinch: bool = False,
         is_grab: bool = False,
     ):
-        """Update cursor. Movement only during Pointing_Up."""
+        """Update cursor with adaptive smoothing and velocity prediction.
+
+        Cursor tracks during any visible gesture except pinch (for click accuracy).
+        """
         now = time.time()
         dt = max(now - self._prev_time, 0.001)
 
@@ -123,28 +139,59 @@ class CursorManager:
         self._state.visible = True
         self._state.timestamp = now
 
-        # Always compute screen position (for display)
-        sx, sy = self.camera_to_screen(hand_x, hand_y)
-        self._state.screen_x = sx
-        self._state.screen_y = sy
+        # Raw screen position from camera
+        raw_x, raw_y = self.camera_to_screen(hand_x, hand_y)
+        self._state.screen_x = raw_x
+        self._state.screen_y = raw_y
 
-        if gesture == "Pointing_Up":
+        # Track during any gesture except pinch (for click precision)
+        should_track = not is_pinch and gesture != "Unknown"
+
+        if should_track:
             self._state.moving = True
 
             if not self._initialized:
-                self._state.x = sx
-                self._state.y = sy
-                self._prev_x = sx
-                self._prev_y = sy
+                self._smooth_x = raw_x
+                self._smooth_y = raw_y
+                self._prev_x = raw_x
+                self._prev_y = raw_y
                 self._initialized = True
             else:
-                dx = sx - self._state.x
-                dy = sy - self._state.y
+                # Distance from current smoothed position to raw target
+                dx = raw_x - self._smooth_x
+                dy = raw_y - self._smooth_y
                 dist = math.sqrt(dx * dx + dy * dy)
-                if dist > self.dead_zone:
-                    self._state.x += (sx - self._state.x) * self.smoothing
-                    self._state.y += (sy - self._state.y) * self.smoothing
 
+                # Adaptive smoothing: fast movement = more responsive
+                speed = self._state.speed
+                speed_factor = 1.0 + min(speed / 800.0, 1.5)
+                alpha = min(self.base_smoothing * speed_factor, 0.85)
+
+                # Adaptive dead zone: larger when moving fast
+                dead = self.base_dead_zone * (1.0 + min(speed / 400.0, 2.0))
+
+                if dist > dead:
+                    self._smooth_x += dx * alpha
+                    self._smooth_y += dy * alpha
+
+                # Velocity prediction: nudge cursor in direction of movement
+                pred_x = self._smooth_x + self._state.velocity_x * self.prediction * dt
+                pred_y = self._smooth_y + self._state.velocity_y * self.prediction * dt
+                pred_x, pred_y = self._clamp_to_screen(pred_x, pred_y)
+
+                # Blend prediction (light touch, don't overshoot)
+                self._smooth_x = self._smooth_x * 0.9 + pred_x * 0.1
+                self._smooth_y = self._smooth_y * 0.9 + pred_y * 0.1
+
+            # Clamp final position
+            self._smooth_x, self._smooth_y = self._clamp_to_screen(
+                self._smooth_x, self._smooth_y
+            )
+
+            self._state.x = self._smooth_x
+            self._state.y = self._smooth_y
+
+            # Compute velocity
             vx = (self._state.x - self._prev_x) / dt
             vy = (self._state.y - self._prev_y) / dt
             self._state.velocity_x = vx
@@ -153,6 +200,10 @@ class CursorManager:
             self._prev_x = self._state.x
             self._prev_y = self._state.y
         else:
+            # During pinch: snap position to raw for hover detection
+            # (cursor overlay freezes visually via moving=False flag)
+            self._state.x = raw_x
+            self._state.y = raw_y
             self._state.moving = False
             self._state.velocity_x = 0.0
             self._state.velocity_y = 0.0

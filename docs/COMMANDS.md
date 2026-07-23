@@ -1,14 +1,10 @@
 # Aether Command System Reference
 
-Aether has two command frameworks: an **event-driven system** used by the brain path and a **direct-execution system** used by the CLI.
+Aether uses an **event-driven command system** (`command/`) where commands are dataclasses executed through the EventBus.
 
 ---
 
-## 1. Event-Driven Command System (`command/`)
-
-Used by `brain_main.py`. Commands are dataclasses passed through the EventBus.
-
-### Command Dataclass
+## Command Dataclass
 
 ```python
 from command.command import Command, CommandStatus
@@ -16,8 +12,8 @@ from command.command import Command, CommandStatus
 cmd = Command(
     name="remember",          # Command name
     params={"name": "hammer", "location": (0.5, 0.3)},  # Arguments
-    source="user",            # Who issued it
-    id="cmd_001",             # Auto-generated
+    source="user",            # Who issued it (keyboard, gesture, cli)
+    id="cmd_001",             # Auto-generated UUID
     timestamp=...,            # Auto-set
     status=CommandStatus.PENDING,
     result=None,
@@ -25,7 +21,17 @@ cmd = Command(
 )
 ```
 
-### BaseCommand ABC
+### Factory Function
+
+```python
+from command.command import create_command
+
+cmd = create_command("open_ui", source="keyboard", panel="system")
+```
+
+---
+
+## BaseCommand ABC
 
 ```python
 from command.command import BaseCommand
@@ -42,20 +48,24 @@ class RememberCommand(BaseCommand):
         return "remember <name> at <x> <y>"
 ```
 
-### CommandRegistry
+---
+
+## CommandRegistry
 
 ```python
 from command.command import create_default_registry
 
 registry = create_default_registry()
-# Registers: OpenUICommand, CloseUICommand, SwitchPanelCommand, 
+# Registers: OpenUICommand, CloseUICommand, SwitchPanelCommand,
 #            SetModeCommand, GetStatusCommand
 
 # Custom registration
 registry.register("my_command", MyCommand())
 ```
 
-### CommandHandler
+---
+
+## CommandHandler
 
 ```python
 from command.handler import CommandHandler
@@ -65,7 +75,6 @@ handler.register_commands(registry)
 
 result = handler.execute(cmd)
 # Returns CommandResult(success=True, message="...", data={...})
-# Also emits COMMAND_EXECUTE and COMMAND_COMPLETE/FAILED on EventBus
 ```
 
 ### Event Flow
@@ -78,59 +87,7 @@ caller → handler.execute(cmd)
            └─→ return CommandResult
 ```
 
----
-
-## 2. Direct-Execution Command System (`commands/`)
-
-Used by the CLI and interactive shell.
-
-### Command ABC
-
-```python
-from commands.base import Command, CommandResult
-
-class FindCommand(Command):
-    def execute(self, **kwargs) -> CommandResult:
-        name = kwargs.get("name", "")
-        results = memory.search_by_name(name)
-        return CommandResult(
-            success=True,
-            message=f"Found {len(results)} object(s)",
-            data=results,
-        )
-```
-
-### CommandRegistry
-
-```python
-from commands import CommandRegistry
-
-registry = CommandRegistry()
-registry.register(RememberCommand())
-registry.register(FindCommand())
-registry.register(ForgetCommand())
-registry.register(ListCommand())
-registry.register(StatusCommand())
-registry.register(TaskCommand())
-
-# Parse and execute from text
-result = registry.parse_and_execute("remember hammer at 0.5 0.3")
-```
-
-### Built-in Commands
-
-| Command | Syntax | Description |
-|---------|--------|-------------|
-| `RememberCommand` | `remember <name> at <x> <y>` | Store object in memory |
-| `FindCommand` | `find <name>` | Search by name (case-insensitive) |
-| `ForgetCommand` | `forget <id>` | Remove by object ID |
-| `ListCommand` | `list` | List all objects |
-| `StatusCommand` | `status [id]` | Show count or object details |
-| `TaskCommand` | `task create <name> <type>` | Create a task |
-
-### Output
-
-All commands return `CommandResult`:
+### CommandResult
 
 ```python
 @dataclass
@@ -140,45 +97,62 @@ class CommandResult:
     data: Any = None
 ```
 
-Example:
-```python
-CommandResult(success=True, message="Remembered 'hammer' as tool", data={"id": "obj_001"})
-```
+---
+
+## Built-in Commands
+
+| Command | Parameters | Description |
+|---------|-----------|-------------|
+| `open_ui` | `panel` (optional) | Open the UI overlay with specified panel |
+| `close_ui` | — | Close the UI overlay |
+| `switch_panel` | `panel` | Switch to system/developer/settings panel |
+| `set_mode` | `mode` | Change mode: normal, developer, presentation |
+| `get_status` | — | Return current system status |
 
 ---
 
-## 3. Gesture Commands (main.py)
+## Gesture Commands
 
-In the vision pipeline, gestures map to commands via `GESTURE_COMMAND_MAP`:
+In the vision pipeline, gestures map to commands via `GestureRouter`:
 
-```python
-GESTURE_COMMAND_MAP = {
-    "Closed_Fist":  "Cancel / Close",
-    "Open_Palm":    "Toggle UI",
-    "Pointing_Up":  "Move Cursor",
-    "Thumb_Up":     "Confirm / Accept",
-    "Thumb_Down":   "Reject / Deny",
-    "Victory":      "Copy / Select",
-    "ILoveYou":     "Show Help",
-    "Unknown":      "",
-}
-```
-
-These are displayed in tkinter popups and on the DPG sidebar.
+| Gesture | Action | Cooldown |
+|---------|--------|----------|
+| `Open_Palm` | Toggle HomeMenu | 1.5s |
+| `Closed_Fist` | Close UI / Cancel | 1.5s |
+| `Victory` | Show Developer Panel | 1.5s |
+| `ILoveYou` | Show Settings Panel | 1.5s |
+| `Thumb_Up` | Set Normal Mode | 1.5s |
+| `Thumb_Down` | Set Developer Mode | 1.5s |
+| `Pointing_Up` | Move Cursor | — |
+| `Pinch` (thumb+index) | Click / Select | Edge-triggered |
 
 ---
 
-## 4. EventBus Commands
+## EventBus Command Events
 
-The EventBus carries command-related events:
-
-| EventType | Emitted When |
-|-----------|-------------|
+| EventType | When |
+|-----------|------|
 | `COMMAND_EXECUTE` | Command execution starts |
 | `COMMAND_COMPLETE` | Command succeeds |
 | `COMMAND_FAILED` | Command fails |
 | `COMMAND_REGISTERED` | New command registered |
 | `COMMAND_UNREGISTERED` | Command removed |
 | `GESTURE_RECOGNIZED` | Gesture triggers action |
+| `INPUT_HOTKEY` | Keyboard hotkey pressed |
 
-See `docs/EVENTS.md` for details.
+---
+
+## Hotkey Mapping
+
+In `brain_main.py`, hotkeys are mapped to commands:
+
+| Hotkey | Command | Parameters |
+|--------|---------|-----------|
+| `Ctrl+Space` | `open_ui` | `{panel: "system"}` |
+| `Escape` | `close_ui` | — |
+| `1` | `switch_panel` | `{panel: "system"}` |
+| `2` | `switch_panel` | `{panel: "developer"}` |
+| `3` | `switch_panel` | `{panel: "settings"}` |
+| `Tab` | `set_mode` | `{mode: "developer"}` |
+| `M` | `set_mode` | `{mode: "normal"}` |
+| `P` | `set_mode` | `{mode: "presentation"}` |

@@ -15,7 +15,7 @@ bus = get_event_bus()
 # Subscribe to events
 handler_id = bus.subscribe(EventType.HAND_DETECTED, my_handler)
 
-# Unsubscribe (by handler or by ID)
+# Unsubscribe
 bus.unsubscribe(EventType.HAND_DETECTED, my_handler)
 bus.unsubscribe(handler_id)
 
@@ -26,12 +26,15 @@ bus.emit(
     source="gesture_executor",
 )
 
+# Emit simple
+bus.emit_simple(EventType.MENU_OPEN, {})
+
 # Get history
 recent = bus.get_history(count=10)
 filtered = bus.get_history(event_type=EventType.HAND_DETECTED)
 
 # Check subscriber count
-bus.subscriber_count(EventType.HAND_DETECTED)
+count = bus.subscriber_count(EventType.HAND_DETECTED)
 ```
 
 ## Event Dataclass
@@ -72,6 +75,10 @@ class Event:
 | `UI_PANEL_HIDE` | `{panel}` | Brain UI |
 | `UI_THEME_CHANGED` | `{theme}` | Settings, UI |
 | `UI_MODE_CHANGED` | `{mode}` | Interaction engine |
+| `UI_OPEN` | `{panel}` | brain_main.py |
+| `UI_CLOSE` | `{}` | brain_main.py |
+| `PANEL_SHOW_REQUESTED` | `{panel}` | Gesture, hotkey |
+| `PANEL_HIDE_REQUESTED` | `{panel}` | Gesture, hotkey |
 
 ### Input Events
 
@@ -79,6 +86,7 @@ class Event:
 |-----------|-------------|------------|
 | `INPUT_KEYBOARD` | `{key, modifiers, action}` | pynput listener |
 | `INPUT_MOUSE` | `{x, y, button, action}` | Gesture executor, OS |
+| `INPUT_HOTKEY` | `{key, source}` | pynput listener |
 | `INPUT_VOICE` | `{text, confidence}` | (Future) Voice plugin |
 | `INPUT_GESTURE` | `{gesture, position}` | (Future) Gesture bridge |
 
@@ -96,7 +104,7 @@ class Event:
 
 | EventType | Data Payload | Emitted By |
 |-----------|-------------|------------|
-| `OBJECT_DETECTED` | `{count, objects: [{name, confidence, box, distance_z}]}` | ObjectSpatialPlugin |
+| `OBJECT_DETECTED` | `{objects: [{name, confidence, box, distance_z}]}` | ObjectSpatialPlugin |
 | `HAND_DETECTED` | `{hands: [{label, landmarks, gesture, gesture_score}]}` | HandPerceptionPlugin |
 | `GESTURE_RECOGNIZED` | `{gesture, action, position, confidence}` | GestureActionExecutor |
 | `FACE_DETECTED` | (Future) | (Future) |
@@ -112,6 +120,7 @@ class Event:
 | `APP_FOCUS_CHANGED` | `{app_name, pid}` | ContextManager |
 | `MODE_CHANGED` | `{mode}` | Interaction engine |
 | `ENVIRONMENT_CHANGED` | `{env}` | ContextManager |
+| `CONTEXT_APP_CHANGED` | `{app, window}` | ContextManager |
 
 ### Memory Events
 
@@ -131,6 +140,14 @@ class Event:
 | `TASK_COMPLETED` | `{task_id}` | TaskManager |
 | `TASK_CANCELLED` | `{task_id}` | TaskManager |
 | `TASK_DELETED` | `{task_id}` | TaskManager |
+
+### Menu Events
+
+| EventType | Data Payload | Emitted By |
+|-----------|-------------|------------|
+| `MENU_OPEN` | `{}` | Gesture (Open_Palm) |
+| `MENU_CLOSE` | `{}` | Gesture (Closed_Fist) |
+| `MENU_ITEM_SELECTED` | `{item}` | UIManager |
 
 ### Plugin Events
 

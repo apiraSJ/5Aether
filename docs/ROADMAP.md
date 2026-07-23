@@ -6,122 +6,121 @@
 
 ## Legend
 
-- ✅ **Complete** — implemented, tested, and working
-- 🚧 **In Progress** — actively being developed
-- ⏳ **Planned** — designed but not started
-- 📝 **Researching** — evaluating approaches
+- **Complete** — implemented, tested, and working
+- **In Progress** — actively being developed
+- **Planned** — designed but not started
+- **Researching** — evaluating approaches
 
 ---
 
-## Phase 1: Foundation ✅
+## Phase 1: Foundation (Complete)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Project structure | ✅ | Modular layout with core/, vision/, ui/, etc. |
-| Virtual environment | ✅ | Python 3.12 on Windows |
-| Event Bus | ✅ | 69 event types, thread-safe, history |
-| YAML Config | ✅ | Deep merge, get/set/save |
-| Logging | ✅ | Console + file with rotation |
-| CI/testing | ✅ | pytest with 84 passing tests |
+| Project structure | Complete | Modular layout with core/, vision/, perception/, interface/ |
+| Virtual environment | Complete | Python 3.12 on Windows |
+| Event Bus | Complete | 69 event types, thread-safe, history |
+| YAML Config | Complete | Deep merge, get/set/save |
+| Logging | Complete | Console + file |
+| CI/testing | Complete | pytest with passing tests |
 
 ---
 
-## Phase 2: Perception ✅
+## Phase 2: Perception (Complete)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Camera capture | ✅ | Synchronous + threaded wrappers |
-| YOLO object detection | ✅ | YOLOv8 nano with configurable confidence |
-| MediaPipe hand tracking | ✅ | HandLandmarker + GestureRecognizer |
-| Gesture recognition (native) | ✅ | GestureRecognizer — 8 built-in gestures |
-| Gesture recognition (fallback) | ✅ | Rule-based finger-counting (5 gestures) |
-| Gesture→Action mapping | ✅ | Executor with cooldown |
-| Gesture popups | ✅ | Tkinter windows on gesture command |
-| solvePnP distance estimation | ✅ | Configurable object dimensions |
-| Hand skeleton overlay | ✅ | 21 landmarks + connections |
-| Object bounding boxes | ✅ | With distance labels |
-| FrameBroker | ✅ | Thread-safe producer-consumer |
-| Background perception threads | ✅ | Daemon threads for hand + object |
+| Camera capture | Complete | Synchronous + threaded wrappers |
+| YOLO object detection | Complete | YOLOv8 nano with configurable confidence |
+| MediaPipe hand tracking | Complete | HandLandmarker + GestureRecognizer |
+| Gesture recognition (native) | Complete | GestureRecognizer — 8 built-in gestures |
+| Gesture recognition (fallback) | Complete | Rule-based finger-counting (5 gestures) |
+| Gesture→Action mapping | Complete | Executor with cooldown |
+| solvePnP distance estimation | Complete | Configurable object dimensions |
+| Hand skeleton overlay | Complete | 21 landmarks + connections |
+| Object bounding boxes | Complete | With distance labels |
+| FrameBroker | Complete | Thread-safe producer-consumer |
+| Background perception threads | Complete | Daemon threads for hand + object |
 
 ---
 
-## Phase 3: Brain & Memory ✅
+## Phase 3: Brain & Memory (Complete)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| ObjectMemory | ✅ | In-memory cache + JSON persistence |
-| JsonStorage | ✅ | Atomic file writes |
-| TaskManager | ✅ | PENDING→RUNNING→COMPLETED lifecycle |
-| Context detection | ✅ | Active window via win32gui |
-| PySide6 UI | ✅ | Frameless floating overlay |
-| Command system (brain) | ✅ | Event-driven CommandHandler |
-| Command system (CLI) | ✅ | Direct execution with registry |
-| Help overlay | ✅ | Auto-hiding hotkey reference |
-| Hotkey listener | ✅ | pynput global hooks |
-| Brain entry point | ✅ | brain_main.py + main_brain.py |
+| ObjectMemory | Complete | In-memory cache + JSON persistence |
+| JsonStorage | Complete | Atomic file writes |
+| TaskManager | Complete | PENDING→RUNNING→COMPLETED lifecycle |
+| Context detection | Complete | Active window via win32gui |
+| PySide6 UI | Complete | Frameless floating overlay |
+| Command system | Complete | Event-driven CommandHandler |
+| Hotkey listener | Complete | pynput global hooks |
+| Brain entry point | Complete | brain_main.py |
 
 ---
 
-## Phase 4: Dashboard ✅
-
-| Feature | Status | Notes |
-|--------|--------|-------|
-| DearPyGui real-time camera | ✅ | GPU-accelerated texture |
-| Sidebar metrics | ✅ | Objects, hands, gesture, command |
-| Manual render loop | ✅ | while-running pattern |
-| OpenCV fallback | ✅ | Automatic if DPG fails |
-| Cursor tracking | ✅ | Crosshair from index fingertip |
-| Mode indicator | ✅ | ACTIVE/PASSIVE display |
-| Command popups | ✅ | Tkinter gesture confirmation |
-
----
-
-## Phase 5: Fusion & Integration 🚧
+## Phase 4: Dashboard & UI (Complete)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Hand+Object interaction | ⏳ | "Hand holds object" fusion |
-| Fusion Engine | ⏳ | Decision-level + temporal fusion |
-| Frame-to-frame tracking | ⏳ | Replace placeholder tracker |
-| Batch object events | ⏳ | Reduce EventBus spam |
-| PerceptionSnapshot | ✅ | Thread-safe state snapshot |
+| DearPyGui real-time camera | Complete | GPU-accelerated texture |
+| Sidebar metrics | Complete | Objects, hands, gesture, command |
+| Manual render loop | Complete | while-running pattern |
+| OpenCV fallback | Complete | Automatic if DPG fails |
+| Cursor tracking | Complete | Crosshair from index fingertip |
+| CursorOverlay (PySide6) | Complete | Holographic reticle with glow |
+| HomeMenu | Complete | Gesture-driven vertical chain menu |
+| StatusBar | Complete | Name, HP bar, CPU%, time |
 
 ---
 
-## Phase 6: Intelligence ⏳
+## Phase 5: Interaction System (Complete)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| AI reasoning engine | 📝 | LLM integration for spatial queries |
-| Voice commands | 📝 | Speech-to-text pipeline |
-| Natural language interface | 📝 | "Find the hammer I was holding" |
-| Object relationship mapping | 📝 | "Hammer is on the workbench" |
-| Spatial scene graph | 📝 | 3D scene understanding |
-| Predictive attention | 📝 | Anticipate user needs |
+| InteractionManager | Complete | Central coordinator for cursor + menu + state |
+| State Machine | Complete | IDLE→TRACKING→MENU_OPEN/PANEL_OPEN |
+| Focus Manager | Complete | Widget hit-testing for cursor hover |
+| Action Queue | Complete | Thread-safe bridge perception → UI |
+| Gesture Router | Complete | Gesture→action routing with cooldown |
+| Cursor Manager | Complete | Camera→screen mapping + smoothing + prediction |
 
 ---
 
-## Phase 7: Desktop Agent ⏳
+## Phase 6: Intelligence (Planned)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Desktop automation | 📝 | Open files, run commands, control apps |
-| Screen OCR | 📝 | Read UI text via OCR |
-| GUI automation | 📝 | Click buttons, fill forms |
-| Workflow recording | 📝 | Record + replay user actions |
-| System monitoring | 📝 | CPU, RAM, disk, network |
+| AI reasoning engine | Researching | LLM integration for spatial queries |
+| Voice commands | Planned | Speech-to-text pipeline |
+| Natural language interface | Planned | "Find the hammer I was holding" |
+| Object relationship mapping | Planned | "Hammer is on the workbench" |
+| Spatial scene graph | Planned | 3D scene understanding |
+| Predictive attention | Planned | Anticipate user needs |
 
 ---
 
-## Phase 8: XR Integration ⏳
+## Phase 7: Desktop Agent (Planned)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Smart glasses support | 📝 | Researching form factor |
-| AR HUD overlay | 📝 | Real-world annotation |
-| Spatial anchors | 📝 | Persistent world-locked content |
-| Eye tracking | 📝 | Gaze-based interaction |
-| Hand tracking (native XR) | 📝 | Direct hand input for AR |
+| Desktop automation | Planned | Open files, run commands, control apps |
+| Screen OCR | Planned | Read UI text via OCR |
+| GUI automation | Planned | Click buttons, fill forms |
+| Workflow recording | Planned | Record + replay user actions |
+| System monitoring | Planned | CPU, RAM, disk, network |
+
+---
+
+## Phase 8: XR Integration (Planned)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Smart glasses support | Researching | Researching form factor |
+| AR HUD overlay | Planned | Real-world annotation |
+| Spatial anchors | Planned | Persistent world-locked content |
+| Eye tracking | Planned | Gaze-based interaction |
+| Hand tracking (native XR) | Planned | Direct hand input for AR |
 
 ---
 
@@ -129,11 +128,11 @@
 
 | Area | Current | Goal |
 |------|---------|------|
-| Unit tests | 84 passing | 100+ |
-| Gesture system | 28 tests | 40+ |
-| EventBus | 5 tests | 10+ |
-| Spatial/PnP | 4 tests | 10+ |
-| Memory | 6 tests | 10+ |
+| Unit tests | Passing | 100+ |
+| Gesture system | Passing | 40+ |
+| EventBus | Passing | 10+ |
+| Spatial/PnP | Passing | 10+ |
+| Memory | Passing | 10+ |
 | Integration tests | — | 20+ |
 | End-to-end tests | — | 10+ |
 

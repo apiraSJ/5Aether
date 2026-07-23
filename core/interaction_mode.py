@@ -34,14 +34,14 @@ class InteractionContext:
         if gesture is None:
             if self.mode != InteractionMode.PASSIVE:
                 self.transition(InteractionMode.PASSIVE)
-        elif gesture == "OPEN_PALM":
+        elif gesture == "Open_Palm":
             if self.mode == InteractionMode.PASSIVE:
                 self.transition(InteractionMode.MENU_OPEN)
-        elif gesture == "POINT":
+        elif gesture == "Pointing_Up":
             self.transition(InteractionMode.POINTING)
-        elif gesture == "PINCH" and self.mode == InteractionMode.POINTING:
+        elif gesture == "Pinch" and self.mode == InteractionMode.POINTING:
             self.transition(InteractionMode.CONFIRMING)
-        elif gesture == "FIST":
+        elif gesture == "Closed_Fist":
             self.transition(InteractionMode.PASSIVE)
 
     @property

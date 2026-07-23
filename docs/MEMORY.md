@@ -108,6 +108,25 @@ count = memory.count
 
 ---
 
+## MemoryStorage (User Preferences)
+
+```python
+from memory.storage import MemoryStorage
+
+prefs = MemoryStorage("data/settings.json")
+prefs.set("mode", "developer")
+prefs.set("last_panel", "system")
+prefs.set("theme", "dark")
+prefs.add_activity("startup")
+
+value = prefs.get("mode")
+memory = prefs.get_memory()
+```
+
+Stores: mode, last_panel, theme, ui_position, user_preferences, recent_activity.
+
+---
+
 ## Storage Layer
 
 ### JsonStorage
@@ -136,37 +155,51 @@ object_store.save(obj_dict)
 obj_dict = object_store.load("obj_001")
 object_store.delete("obj_001")
 all = object_store.list_all()
+results = object_store.search(name="hammer")
 ```
 
-### TaskStore / EventStore
+### TaskStore
 
 ```python
 from database.tasks import TaskStore
-from database.events import EventStore
 
 task_store = TaskStore(JsonStorage("data/tasks.json"))
+task_store.save(task_dict)
 pending = task_store.list_by_status("pending")
+all = task_store.list_all()
+```
+
+### EventStore
+
+```python
+from database.events import EventStore
 
 event_store = EventStore(JsonStorage("data/events.json"))
 event_store.log("object_detected", {"id": "obj_001"})
 recent = event_store.get_recent(10)
+by_type = event_store.get_by_type("hand_detected")
 ```
 
 ---
 
-## MemoryStorage (User Preferences)
+## TaskManager
 
 ```python
-from memory.storage import MemoryStorage
+from tasks.manager import TaskManager
 
-prefs = MemoryStorage("data/settings.json")
-prefs.set("mode", "developer")
-prefs.set("last_panel", "system")
-prefs.set("theme", "dark")
-prefs.add_activity("startup")
+manager = TaskManager(task_store)
+
+# CRUD with automatic timestamps
+task = manager.create(name="Find hammer", type="search")
+manager.update_status(task.id, "running")   # Sets started_at
+manager.complete(task.id)                    # Sets completed_at
+manager.cancel(task.id)                      # Sets completed_at + status=cancelled
+manager.remove(task.id)
+
+# Query
+all_tasks = manager.list_all()
+pending = manager.list_by_status("pending")
 ```
-
-Stores: mode, last_panel, theme, ui_position, user_preferences, recent_activity.
 
 ---
 
@@ -184,3 +217,14 @@ Memory operations emit events on the EventBus:
 | `TASK_UPDATED` | Task status changed |
 | `TASK_COMPLETED` | Task completed |
 | `TASK_CANCELLED` | Task cancelled |
+
+---
+
+## Data Files
+
+| File | Contents | Format |
+|------|----------|--------|
+| `data/objects.json` | Spatial objects | Array of object dicts |
+| `data/tasks.json` | Tasks | Array of task dicts |
+| `data/events.json` | Event log | Array of event dicts |
+| `data/settings.json` | User preferences | Key-value dict |

@@ -9,7 +9,7 @@
 ### `core.event_bus`
 
 ```python
-from core.event_bus import EventBus, EventType, Event
+from core.event_bus import EventBus, EventType, Event, get_event_bus
 
 # Singleton access
 bus = get_event_bus()
@@ -21,6 +21,7 @@ bus.unsubscribe(handler_id)
 
 # Emit
 bus.emit(EventType.GESTURE_RECOGNIZED, data={...}, source="module_name")
+bus.emit_simple(EventType.MENU_OPEN, {})
 
 # History
 recent = bus.get_history(count=10)
@@ -47,13 +48,14 @@ class Event:
 Categories:
 - `SYSTEM_*` — startup, shutdown, error, config
 - `UI_*` — open/close, panel show/hide, theme, mode
-- `INPUT_*` — keyboard, mouse, voice, gesture
+- `INPUT_*` — keyboard, mouse, voice, gesture, hotkey
 - `COMMAND_*` — execute, complete, failed, registered
 - `TASK_*` — created, updated, completed, cancelled
 - `PLUGIN_*` — loaded, unloaded, error
 - `VISION_*` — object/hand/gesture/face/pose detected
 - `CONTEXT_*` — context/app/mode/environment changed
 - `MEMORY_*` — object added/updated/removed/searched
+- `MENU_*` — open, close, item selected
 - `STATUS_*` — health, performance, resource
 
 See `docs/EVENTS.md` for the full list.
@@ -70,15 +72,16 @@ from core.frame_broker import FrameBroker
 broker = FrameBroker()
 
 # Producer (camera thread)
-broker.update_frame(frame)     # Store frame + set event
+broker.update_frame(frame)     # Store frame + signal all consumers
 
-# Consumer (perception threads)
-broker.new_frame_event.wait()  # Block until new frame
+# Consumer (perception threads) — per-consumer Event
+frame_event = broker.register_consumer("my_consumer")
+frame_event.wait(timeout=1.0)  # Block until new frame
 frame = broker.get_frame()     # Get latest frame (non-blocking)
-broker.clear_event()           # Reset event after consuming
+frame_event.clear()            # Reset after consuming
 
-# Deconstructor
-frame = broker.get_frame()     # Same as get_frame() + deque
+# Cleanup
+broker.unregister_consumer("my_consumer")
 ```
 
 ---
@@ -89,16 +92,16 @@ frame = broker.get_frame()     # Same as get_frame() + deque
 
 ```python
 from vision.gesture_actions import (
-    GestureType,        # Enum: FIST, OPEN_PALM, POINT, THUMBS_UP, THUMB_DOWN, UNKNOWN
-    ActionType,         # Enum: TOGGLE_UI, MOVE_CURSOR, CLICK, CONFIRM, CANCEL, NO_ACTION
-    GestureAction,      # Dataclass: action, gesture, position, confidence, timestamp
-    HandFeatures,       # Static methods: is_finger_extended, count_extended, pinch_distance, etc.
+    GestureType,          # Enum: FIST, OPEN_PALM, POINT, THUMBS_UP, THUMB_DOWN, UNKNOWN
+    ActionType,           # Enum: TOGGLE_UI, MOVE_CURSOR, CLICK, CONFIRM, CANCEL, NO_ACTION
+    GestureAction,        # Dataclass: action, gesture, position, confidence, timestamp
+    HandFeatures,         # Static methods for finger analysis
     DEFAULT_GESTURE_MAP,  # Dict[GestureType, ActionType]
-    GESTURE_COMMAND_NAMES, # Dict[GestureType, str]
+    GESTURE_COMMAND_NAMES,# Dict[GestureType, str]
 )
 
 # Finger counting
-lm = hand.landmarks
+lm = hand_landmarks
 extended = HandFeatures.count_extended(lm)
 is_index_up = HandFeatures.is_finger_extended(lm, "index")
 distance = HandFeatures.pinch_distance(lm)
@@ -135,7 +138,8 @@ cursor = executor.get_cursor()  # → (x, y)
 ```python
 from vision.hand_tracker import HandTracker, HandData, HandResults, HandLandmark
 
-tracker = HandTracker(model_path="models/hand_landmarker.task")
+tracker = HandTracker(config={"model_path": "models/hand_landmarker.task"})
+tracker.initialize()
 results = tracker.process(frame_bgr)
 # results.hands — list of HandData
 # results.timestamp_ms
@@ -146,20 +150,21 @@ results = tracker.process(frame_bgr)
 #   .handedness — "Left" or "Right"
 #   .confidence — detection confidence
 #   .bounding_box — (x1, y1, x2, y2)
+tracker.shutdown()
 ```
 
 ### `vision.hand_landmarks`
 
 ```python
-from vision.hand_landmarks import Landmark, HAND_CONNECTIONS
+from vision.hand_landmarks import Landmark, HAND_CONNECTIONS, FINGER_TIPS
 
-Landmark.WRIST          # 0
-Landmark.THUMB_TIP      # 4
-Landmark.INDEX_FINGER_TIP  # 8
+Landmark.WRIST              # 0
+Landmark.THUMB_TIP          # 4
+Landmark.INDEX_FINGER_TIP   # 8
 # ... 21 constants
 
-# 20 bone connections for drawing skeleton
-HAND_CONNECTIONS  # list of (a, b) tuples
+HAND_CONNECTIONS  # list of (a, b) tuples — 20 bone connections
+FINGER_TIPS       # [4, 8, 12, 16, 20] — tip indices
 ```
 
 ---
@@ -199,31 +204,15 @@ frame = draw_3d_axes(frame, camera_matrix, rvec, tvec)
 distance = calculate_distance(tvec)  # L2 norm
 ```
 
----
-
-## Plugin System
-
-### `core.plugin_manager`
+### `vision.calibration`
 
 ```python
-from core.plugin_manager import PluginManager, Plugin
+from vision.calibration import Calibration
 
-class MyPlugin(Plugin):
-    name = "my_plugin"
-
-    def initialize(self):
-        pass
-
-    def process(self, frame) -> dict:
-        return {"result": ...}
-
-    def shutdown(self):
-        pass
-
-manager = PluginManager()
-manager.register(MyPlugin())
-results = manager.process_all(frame)  # → {"my_plugin": {...}}
-manager.shutdown_all()
+calib = Calibration(width=640, height=480)
+camera_matrix = calib.camera_matrix
+dist_coeffs = calib.dist_coeffs
+# Loads from YAML if available, otherwise approximates
 ```
 
 ---
@@ -233,23 +222,23 @@ manager.shutdown_all()
 ### Event-Driven (`command/`)
 
 ```python
-from command.command import Command, CommandRegistry, create_default_registry
-from command.handler import CommandHandler
+from command.command import Command, CommandRegistry, create_default_registry, create_command
+from command.handler import CommandHandler, CommandResult
 
-# Create and execute a command
-cmd = Command(name="remember", params={"name": "hammer", "location": (0.5, 0.3)})
+# Create a command
+cmd = Command(name="open_ui", params={"panel": "system"}, source="keyboard")
+cmd = create_command("open_ui", source="keyboard", panel="system")
+
+# Execute
 handler = CommandHandler(event_bus)
 result = handler.execute(cmd)
-```
+# result.success — bool
+# result.message — str
+# result.data — Any
 
-### Direct-Execution (`commands/`)
-
-```python
-from commands import CommandRegistry
-
-registry = CommandRegistry()
-registry.register(RememberCommand())
-result = registry.parse_and_execute("remember hammer at 0.5 0.3")
+# Registry
+registry = create_default_registry()
+handler.register_commands(registry)
 ```
 
 ---
@@ -260,19 +249,18 @@ result = registry.parse_and_execute("remember hammer at 0.5 0.3")
 
 ```python
 from memory.object_memory import ObjectMemory
-from memory.models import SpatialObject
 
 memory = ObjectMemory(object_store)
 
 # CRUD
-obj = memory.add("hammer", location=(0.5, 0.3), label="tool")
+obj = memory.add(name="hammer", location=(0.5, 0.3), label="tool")
 memory.update(obj.id, status="active")
 memory.remove(obj.id)
 obj = memory.get(obj.id)
 
 # Search
 results = memory.search_by_name("hammer")
-results = memory.get_by_location(x=0.5, y=0.3)
+results = memory.get_by_location(x=0.5, y=0.3, tolerance=0.1)
 
 # Listing
 all_objects = memory.list_all()
@@ -293,6 +281,19 @@ obj.to_dict()  # → dict
 SpatialObject.from_dict(d)  # → SpatialObject
 ```
 
+### `memory.storage`
+
+```python
+from memory.storage import MemoryStorage
+
+prefs = MemoryStorage("data/settings.json")
+prefs.set("mode", "developer")
+prefs.set("last_panel", "system")
+value = prefs.get("mode")
+prefs.add_activity("startup")
+memory = prefs.get_memory()
+```
+
 ---
 
 ## Task System
@@ -303,13 +304,14 @@ SpatialObject.from_dict(d)  # → SpatialObject
 from tasks.manager import TaskManager
 
 manager = TaskManager(task_store)
-task = manager.create_task("Find hammer", "search")
-manager.update_status(task.id, "running")
-manager.complete_task(task.id)
-manager.cancel_task(task.id)
-manager.remove_task(task.id)
+task = manager.create(name="Find hammer", type="search")
+manager.update_status(task.id, "running")   # Sets started_at
+manager.complete(task.id)                    # Sets completed_at
+manager.cancel(task.id)
+manager.remove(task.id)
 
-tasks = manager.list_by_status("pending")
+tasks = manager.list_all()
+pending = manager.list_by_status("pending")
 ```
 
 ---
@@ -326,7 +328,43 @@ store.set("key", value)
 value = store.get("key")
 store.delete("key")
 keys = store.keys()
+all_data = store.all()
 store.clear()
+```
+
+### `database.objects`
+
+```python
+from database.objects import ObjectStore
+
+obj_store = ObjectStore(JsonStorage("data/objects.json"))
+obj_store.save(obj_dict)
+obj_dict = obj_store.load("obj_001")
+obj_store.delete("obj_001")
+all = obj_store.list_all()
+results = obj_store.search(name="hammer")
+```
+
+### `database.tasks`
+
+```python
+from database.tasks import TaskStore
+
+task_store = TaskStore(JsonStorage("data/tasks.json"))
+task_store.save(task_dict)
+pending = task_store.list_by_status("pending")
+all = task_store.list_all()
+```
+
+### `database.events`
+
+```python
+from database.events import EventStore
+
+event_store = EventStore(JsonStorage("data/events.json"))
+event_store.log("object_detected", {"id": "obj_001"})
+recent = event_store.get_recent(10)
+by_type = event_store.get_by_type("hand_detected")
 ```
 
 ---
@@ -350,35 +388,35 @@ All keys and defaults are in `settings.py` `DEFAULT_SETTINGS`.
 
 ## Perception Threads
 
-### `perception/hand_plugin.py`
+### `perception.hand_plugin`
 
 ```python
 from perception.hand_plugin import HandPerceptionPlugin
 
 plugin = HandPerceptionPlugin(
     broker=broker,
-    bus=bus,
+    bus=event_bus,
     model_path="models/gesture_recognizer.task",
     config={"num_hands": 2},
 )
 plugin.start()
-# ...
+# Emits HAND_DETECTED events on EventBus
 plugin.stop()
 ```
 
-### `perception/object_plugin.py`
+### `perception.object_plugin`
 
 ```python
 from perception.object_plugin import ObjectSpatialPlugin
 
 plugin = ObjectSpatialPlugin(
     broker=broker,
-    bus=bus,
-    model_path="yolov8n.pt",
+    bus=event_bus,
+    model_weight="yolov8n.pt",
     config={"confidence": 0.25},
 )
 plugin.start()
-# ...
+# Emits OBJECT_DETECTED events on EventBus
 plugin.stop()
 ```
 
@@ -392,42 +430,74 @@ plugin.stop()
 from context.context_manager import ContextManager
 
 ctx = ContextManager()
-snapshot = ctx.get_current_context()
-# → {"mode": "developer", "active_app": "Code.exe",
-#     "cpu_percent": 45.0, "memory_percent": 62.3, ...}
+ctx.update(active_app="Code.exe", active_window="main.py")
+mode = ctx.get_mode()           # → "developer" / "presentation" / "normal"
+ctx.set_mode("developer")
+context = ctx.get_context()     # → ContextSnapshot
+summary = ctx.get_summary()     # → dict with all context info
+history = ctx.get_history(10)   # → list of recent snapshots
 ```
 
 ---
 
-## UI
+## Interaction
 
-### `ui.dashboard`
+### `interaction.interaction_manager`
 
 ```python
-from ui.dashboard import Dashboard
+from interaction.interaction_manager import InteractionManager
 
-dashboard = Dashboard(event_bus)
-dashboard.run()  # Blocking DPG render loop
+manager = InteractionManager(cursor_manager, ui_manager, event_bus)
+manager.update()  # Call each frame
 ```
 
-### `ui.hand_overlay`
+### `interaction.state_machine`
 
 ```python
-from ui.hand_overlay import HandOverlay
+from interaction.state_machine import InteractionStateMachine, InteractionState
 
-overlay = HandOverlay()
-frame = overlay.draw_landmarks(frame, landmarks)
-frame = overlay.draw_cursor(frame, x, y, gesture)
-frame = overlay.draw_gesture_label(frame, gesture, action)
+fsm = InteractionStateMachine()
+fsm.on("transition", callback)
+fsm.hand_detected()    # IDLE → TRACKING
+fsm.menu_opened()      # TRACKING → MENU_OPEN
+fsm.menu_closed()      # MENU_OPEN → TRACKING
+fsm.hand_lost()        # TRACKING → IDLE
+current = fsm.current   # → InteractionState
 ```
 
-### `interface.ui`
+### `interaction.focus_manager`
 
 ```python
-from interface.ui import run_aether_ui
+from interaction.focus_manager import FocusManager
 
-run_aether_ui(event_bus, engine, memory, context)
-# Starts PySide6 event loop (blocking)
+fm = FocusManager()
+fm.register("button1", x=100, y=200, width=80, height=40,
+            on_focus=lambda: print("focused"),
+            on_blur=lambda: print("blurred"),
+            on_select=lambda: print("selected"))
+fm.update(cursor_x=120, cursor_y=210)  # Hit test
+fm.select()                             # Trigger on_select if focused
+```
+
+---
+
+## Cursor Manager
+
+### `core.cursor_manager`
+
+```python
+from core.cursor_manager import CursorManager
+
+cm = CursorManager()
+cm.update(hand_x=0.5, hand_y=0.3, gesture="Pointing_Up",
+          gesture_score=0.95, is_pinch=False)
+state = cm.get_state()
+# state.screen_x, state.screen_y — screen coordinates
+# state.is_pinch — bool
+# state.gesture — str
+# state.is_visible — bool
+cm.hide()
+cm.show()
 ```
 
 ---
@@ -450,10 +520,75 @@ app.shutdown()
 ```python
 from core.engine import AetherEngine, create_engine
 
-engine = create_engine()
+engine = create_engine(config)
 engine.initialize()
 engine.start()
 # ...
 engine.stop()
 engine.shutdown()
+status = engine.get_status()
+```
+
+---
+
+## Interface (PySide6)
+
+### `interface.ui`
+
+```python
+from interface.ui import AetherUI, create_system_panel, create_developer_panel, create_settings_panel
+
+ui = AetherUI(context_manager=ctx, memory_storage=memory)
+ui.register_panel("system", "SYSTEM", create_system_panel(ctx))
+ui.show_panel("system")
+ui.set_mode("developer")
+ui.show()
+```
+
+### `interface.ui_manager`
+
+```python
+from interface.ui_manager import UIManager
+
+mgr = UIManager(cursor_manager, event_bus)
+mgr.show()
+mgr.update_hover()
+action = mgr.handle_pinch_click()
+```
+
+### `interface.home_menu`
+
+```python
+from interface.home_menu import HomeMenu
+
+menu = HomeMenu(parent=None)
+menu.show_at(x=100, y=200)
+menu.hide_menu()
+menu.update_hover(cursor_x=120, cursor_y=250)
+item = menu.select_hovered()
+```
+
+### `interface.cursor_overlay`
+
+```python
+from interface.cursor_overlay import CursorOverlay
+
+overlay = CursorOverlay(cursor_manager)
+overlay.show()
+# Automatically renders at ~60 FPS via QTimer
+```
+
+### `interface.hud_renderer`
+
+```python
+from interface.hud_renderer import (
+    process_hud_overlays,
+    draw_cursor_on_frame,
+    draw_status_bar,
+    draw_pinch_line,
+)
+
+processed = process_hud_overlays(frame, hands, objects, mirror=True)
+draw_cursor_on_frame(frame, x, y, is_pinch, gesture, mirror=True)
+draw_status_bar(frame, gesture, is_pinch, hand_count)
 ```

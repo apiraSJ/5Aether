@@ -188,9 +188,9 @@ def _wire_events(engine, ui, command_handler, context, memory, bus):
 
         if gesture == "Open_Palm" and cooldown_ok:
             if _ui_manager.home_menu.is_visible:
-                bus.emit_simple(EventType.MENU_OPEN, {})
+                bus.emit_simple(EventType.MENU_CLOSE, {})
             else:
-                bus.emit_simple(EventType.UI_OPEN, {})
+                bus.emit_simple(EventType.MENU_OPEN, {})
             _last_gesture = gesture
             _last_gesture_time = now
 

@@ -1,9 +1,8 @@
 """
 Cursor Overlay — Transparent PySide6 fullscreen window
 
-Draws the Aether virtual cursor (blue holographic reticle).
-Cursor only moves during Pointing_Up gesture.
-On other gestures, cursor floats frozen at last position.
+Draws the Aether virtual cursor (orange holographic reticle).
+Matches the VR-clean theme: silver idle, orange active.
 """
 
 import math
@@ -24,35 +23,31 @@ class CursorOverlay(QWidget):
         self.cursor_manager = cursor_manager
 
         # Reticle appearance
-        self._outer_radius = 24
-        self._inner_radius = 4
-        self._ring_width = 2.5
-        self._glow_radius = 44
+        self._outer_radius = 22
+        self._inner_radius = 3
+        self._ring_width = 2.0
+        self._glow_radius = 40
 
-        # Colors
-        self._color_idle = QColor(0, 200, 255, 180)       # cyan — frozen/pointing idle
-        self._color_moving = QColor(0, 255, 200, 220)      # green-cyan — cursor moving
-        self._color_pinch = QColor(0, 255, 180, 240)       # bright green — pinch/click
-        self._color_grab = QColor(255, 200, 0, 220)        # gold — grab
-        self._color_no_hand = QColor(80, 80, 100, 60)      # dim — no hand
+        # Theme colors (matches HomeMenu)
+        self._color_idle = QColor(192, 192, 192, 160)       # silver — idle
+        self._color_moving = QColor(255, 140, 50, 200)       # warm orange — moving
+        self._color_pinch = QColor(255, 119, 0, 240)         # bright orange — click
+        self._color_grab = QColor(255, 200, 0, 220)          # gold — grab
 
         # Animation
         self._pulse_phase = 0.0
         self._pulse_speed = 3.0
-
-        # State
-        self._gesture_label = ""
 
         self._setup_window()
         self._start_render_loop()
 
     def _setup_window(self):
         self.setWindowFlags(
-            Qt.FramelessWindowHint |
-            Qt.WindowStaysOnTopHint |
-            Qt.Tool |
-            Qt.NoDropShadowWindowHint |
-            Qt.WindowTransparentForInput
+            Qt.FramelessWindowHint
+            | Qt.WindowStaysOnTopHint
+            | Qt.Tool
+            | Qt.NoDropShadowWindowHint
+            | Qt.WindowTransparentForInput
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
@@ -85,7 +80,7 @@ class CursorOverlay(QWidget):
 
         # Pulse animation
         self._pulse_phase += self._pulse_speed / 60.0
-        pulse = 0.85 + 0.15 * math.sin(self._pulse_phase)
+        pulse = 0.88 + 0.12 * math.sin(self._pulse_phase)
 
         # Choose color based on state
         if state.is_grab:
@@ -95,12 +90,12 @@ class CursorOverlay(QWidget):
         elif state.moving:
             color = self._color_moving
         else:
-            color = self._color_idle  # frozen / other gesture
+            color = self._color_idle
 
         # Glow
         glow = QRadialGradient(QPointF(x, y), self._glow_radius * pulse)
-        glow.setColorAt(0, QColor(color.red(), color.green(), color.blue(), 45))
-        glow.setColorAt(0.5, QColor(color.red(), color.green(), color.blue(), 12))
+        glow.setColorAt(0, QColor(color.red(), color.green(), color.blue(), 40))
+        glow.setColorAt(0.5, QColor(color.red(), color.green(), color.blue(), 10))
         glow.setColorAt(1.0, QColor(color.red(), color.green(), color.blue(), 0))
         painter.setBrush(QBrush(glow))
         painter.setPen(Qt.NoPen)
@@ -123,22 +118,22 @@ class CursorOverlay(QWidget):
         line_color = QColor(color)
         line_color.setAlpha(70)
         painter.setPen(QPen(line_color, 1.0))
-        tick = 8
-        painter.drawLine(QPointF(x - outer - 4, y), QPointF(x - outer + tick, y))
-        painter.drawLine(QPointF(x + outer - tick, y), QPointF(x + outer + 4, y))
-        painter.drawLine(QPointF(x, y - outer - 4), QPointF(x, y - outer + tick))
-        painter.drawLine(QPointF(x, y + outer - tick), QPointF(x, y + outer + 4))
+        tick = 7
+        painter.drawLine(QPointF(x - outer - 3, y), QPointF(x - outer + tick, y))
+        painter.drawLine(QPointF(x + outer - tick, y), QPointF(x + outer + 3, y))
+        painter.drawLine(QPointF(x, y - outer - 3), QPointF(x, y - outer + tick))
+        painter.drawLine(QPointF(x, y + outer - tick), QPointF(x, y + outer + 3))
 
         # Gesture label below cursor
         if state.gesture and state.gesture != "Unknown":
-            font = QFont("Segoe UI", 9)
+            font = QFont("Segoe UI", 8)
             painter.setFont(font)
             label_color = QColor(color)
-            label_color.setAlpha(160)
+            label_color.setAlpha(140)
             painter.setPen(QPen(label_color))
             label = state.gesture.replace("_", " ")
             if not state.moving:
-                label += "  · frozen"
+                label += "  · idle"
             painter.drawText(QPointF(x + outer + 8, y + 4), label)
 
         painter.end()

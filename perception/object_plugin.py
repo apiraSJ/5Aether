@@ -24,6 +24,7 @@ class ObjectSpatialPlugin(threading.Thread):
         self.config = config or {}
         self.logger = logging.getLogger("Aether.ObjectSpatialPlugin")
         self._running = True
+        self._frame_event = self.broker.register_consumer("object_spatial")
 
         # Load YOLO
         self.model = YOLO(model_weight)
@@ -46,12 +47,11 @@ class ObjectSpatialPlugin(threading.Thread):
         self.logger.info("Object spatial plugin ready")
 
         while self._running:
-            self.broker.new_frame_event.wait(timeout=1.0)
+            self._frame_event.wait(timeout=1.0)
             if not self._running:
                 break
-
+            self._frame_event.clear()
             frame = self.broker.get_frame()
-            self.broker.clear_event()
             if frame is None:
                 continue
 
@@ -99,6 +99,7 @@ class ObjectSpatialPlugin(threading.Thread):
 
     def stop(self):
         self._running = False
-        self.broker.new_frame_event.set()
+        self._frame_event.set()
         self.join(timeout=2.0)
+        self.broker.unregister_consumer("object_spatial")
         self.logger.info("Object spatial plugin stopped")

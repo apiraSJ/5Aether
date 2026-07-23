@@ -14,9 +14,9 @@ hand_tracking:
   enabled: true
   model_path: "models/gesture_recognizer.task"
   num_hands: 2
-  min_hand_detection_confidence: 0.5
-  min_hand_presence_confidence: 0.5
-  min_tracking_confidence: 0.5
+  min_hand_detection_confidence: 0.3
+  min_hand_presence_confidence: 0.3
+  min_tracking_confidence: 0.3
 
 gesture_engine:
   enabled: true
@@ -26,7 +26,7 @@ gesture_engine:
 interaction:
   default_mode: "passive"
   activation_gesture: "OPEN_PALM"
-  activation_dwell_ms: 800
+  activation_dwell_ms: 1000
   preview_timeout_ms: 3000
 
 logging:
@@ -52,3 +52,10 @@ spatial:
   focal_length: 640
   center_x: 320
   center_y: 240
+
+cursor:
+  smoothing: 0.15
+  dead_zone: 1
+  sensitivity: 2.0
+  prediction: 0.12
+  mirror_x: true

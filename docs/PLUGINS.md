@@ -1,105 +1,24 @@
 # Aether Plugin Development Guide
 
-Aether has two plugin systems — one for **vision perception** (used by the perception pipeline) and one for **brain modules** (used by the engine lifecycle).
+Aether has two plugin systems — one for **perception daemon threads** (primary, used by `main.py`) and one for **batch processing plugins** (alternative, used by `PerceptionPipeline`).
 
 ---
 
-## 1. Perception Plugin System
+## 1. Daemon Thread Perception Plugins (`perception/`)
 
-### Plugin ABC (`core/plugin_manager.py`)
+The primary perception system — independent threads that consume frames from `FrameBroker` and emit events on the `EventBus`.
 
-Vision plugins implement the `Plugin` abstract base class:
+### Architecture
 
-```python
-from abc import ABC, abstractmethod
-
-class Plugin(ABC):
-    @abstractmethod
-    def initialize(self):
-        """Called once when the plugin is loaded."""
-        pass
-
-    @abstractmethod
-    def process(self, frame) -> dict:
-        """Process a single camera frame. Returns a dict of results.
-        
-        Args:
-            frame: numpy.ndarray, BGR camera frame
-            
-        Returns:
-            dict: Plugin-specific output (e.g., detections, landmarks)
-        """
-        pass
-
-    @abstractmethod
-    def shutdown(self):
-        """Called when the plugin is unloaded."""
-        pass
+```text
+FrameBroker
+    │
+    ├─→ HandPerceptionPlugin (daemon thread)
+    │     └─→ Emits HAND_DETECTED on EventBus
+    │
+    └─→ ObjectSpatialPlugin (daemon thread)
+          └─→ Emits OBJECT_DETECTED on EventBus
 ```
-
-### PluginManager
-
-```python
-from core.plugin_manager import PluginManager
-
-manager = PluginManager()
-
-# Register plugins
-manager.register(yolo_plugin)
-manager.register(hand_plugin)
-
-# Process a frame through all registered plugins
-results = manager.process_all(frame)
-# results = {"yolo": [...], "hand": HandResults}
-
-# Shutdown all plugins
-manager.shutdown_all()
-```
-
-### PerceptionPipeline
-
-The pipeline orchestrates plugins per frame:
-
-```python
-from core.perception_pipeline import PerceptionPipeline
-
-pipeline = PerceptionPipeline(event_bus, plugin_manager)
-result = pipeline.process(frame)
-# result.detections — list of object detections
-# result.hand_results — HandResults from hand plugin
-```
-
-### Example: Custom Object Plugin
-
-```python
-from core.plugin_manager import Plugin
-
-class MyDetectorPlugin(Plugin):
-    name = "my_detector"
-
-    def initialize(self):
-        self.model = load_my_model()
-
-    def process(self, frame):
-        detections = self.model(frame)
-        return {"my_detections": detections}
-
-    def shutdown(self):
-        del self.model
-```
-
-### Built-in Plugins
-
-| Plugin | File | Model | Output |
-|--------|------|-------|--------|
-| `YoloPlugin` | `plugins/yolo_plugin.py` | YOLOv8 (ultralytics) | List of `{box, confidence, class_id, label}` |
-| `HandPlugin` | `plugins/hand_plugin.py` | MediaPipe HandLandmarker | `HandResults` with 21 landmarks |
-
----
-
-## 2. Daemon Thread Plugin System
-
-The `perception/` directory contains higher-level worker threads that consume from `FrameBroker` and emit to `EventBus`. These are the primary perception system used by `main.py`.
 
 ### HandPerceptionPlugin
 
@@ -131,7 +50,7 @@ plugin.stop()
 ```python
 from perception.object_plugin import ObjectSpatialPlugin
 
-plugin = ObjectSpatialPlugin(broker, bus, model_path, config)
+plugin = ObjectSpatialPlugin(broker, bus, model_weight, config)
 plugin.start()
 ```
 
@@ -163,14 +82,15 @@ class MyPerceptionPlugin(threading.Thread):
         self.bus = bus
         self.config = config or {}
         self._running = True
+        self._frame_event = self.broker.register_consumer("my_plugin")
 
     def run(self):
         while self._running:
-            self.broker.new_frame_event.wait(timeout=1.0)
+            self._frame_event.wait(timeout=1.0)
             if not self._running:
                 break
+            self._frame_event.clear()
             frame = self.broker.get_frame()
-            self.broker.clear_event()
             if frame is None:
                 continue
 
@@ -186,8 +106,66 @@ class MyPerceptionPlugin(threading.Thread):
 
     def stop(self):
         self._running = False
-        self.broker.new_frame_event.set()
+        self._frame_event.set()
         self.join(timeout=2.0)
+        self.broker.unregister_consumer("my_plugin")
+```
+
+---
+
+## 2. Batch Processing Plugins (`core/plugin_manager.py`)
+
+Alternative plugin interface for frame-by-frame processing through `PerceptionPipeline`.
+
+### Plugin ABC
+
+```python
+from core.plugin_manager import Plugin
+
+class MyDetectorPlugin(Plugin):
+    @property
+    def name(self) -> str:
+        return "my_detector"
+
+    def initialize(self, config: dict) -> None:
+        self.model = load_my_model()
+
+    def process(self, frame, **kwargs) -> dict:
+        detections = self.model(frame)
+        return {"my_detections": detections}
+
+    def shutdown(self) -> None:
+        del self.model
+```
+
+### PluginManager
+
+```python
+from core.plugin_manager import PluginManager
+
+manager = PluginManager()
+
+# Register plugins
+manager.register(yolo_plugin)
+manager.register(hand_plugin)
+
+# Process a frame through all registered plugins
+results = manager.process_all(frame)
+# results = {"yolo": [...], "hand": HandResults}
+
+# Shutdown all plugins
+manager.shutdown_all()
+```
+
+### PerceptionPipeline
+
+```python
+from core.perception_pipeline import PerceptionPipeline
+
+pipeline = PerceptionPipeline(event_bus, plugin_manager)
+result = pipeline.process(frame)
+# result.detections — list of object detections
+# result.hand_results — HandResults from hand plugin
 ```
 
 ---
@@ -231,7 +209,36 @@ manager.shutdown_all()
 
 ---
 
-## 4. EventBus Integration
+## 4. PerceptionWorker (Background ML Pipeline)
+
+An alternative pipeline that runs ML inference throttled at a configurable target FPS:
+
+```text
+Camera → PerceptionPipeline → YOLO Plugin + Hand Plugin
+    → SpatialEstimator (PnP distances)
+    → GestureEngine + GestureActionExecutor
+    → PerceptionSnapshot (thread-safe state)
+```
+
+```python
+from core.perception_worker import PerceptionWorker
+
+worker = PerceptionWorker(broker, event_bus, config)
+worker.start()
+
+# Get latest snapshot (thread-safe)
+snapshot = worker.get_latest()
+# snapshot.detections — list of objects
+# snapshot.hands — list of hand observations
+# snapshot.gesture — current gesture string
+
+fps = worker.get_fps()
+worker.stop()
+```
+
+---
+
+## 5. EventBus Integration
 
 All plugins communicate via the central EventBus:
 

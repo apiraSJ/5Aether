@@ -1,10 +1,10 @@
 {
   "mode": "developer",
-  "last_panel": "system",
+  "last_panel": "developer",
   "theme": "dark",
   "ui_position": {
-    "x": 105,
-    "y": 56
+    "x": 63,
+    "y": 55
   },
   "user_preferences": {},
   "recent_activity": []

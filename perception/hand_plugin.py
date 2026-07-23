@@ -24,6 +24,7 @@ class HandPerceptionPlugin(threading.Thread):
         self.config = config or {}
         self.logger = logging.getLogger("Aether.HandPerceptionPlugin")
         self._running = True
+        self._frame_event = self.broker.register_consumer("hand_perception")
 
     def run(self):
         try:
@@ -41,12 +42,11 @@ class HandPerceptionPlugin(threading.Thread):
                 self.logger.info(f"Gesture recognizer ready (model={self.model_path})")
 
                 while self._running:
-                    self.broker.new_frame_event.wait(timeout=1.0)
+                    self._frame_event.wait(timeout=1.0)
                     if not self._running:
                         break
-
+                    self._frame_event.clear()
                     frame = self.broker.get_frame()
-                    self.broker.clear_event()
                     if frame is None:
                         continue
 
@@ -83,6 +83,7 @@ class HandPerceptionPlugin(threading.Thread):
 
     def stop(self):
         self._running = False
-        self.broker.new_frame_event.set()
+        self._frame_event.set()
         self.join(timeout=2.0)
+        self.broker.unregister_consumer("hand_perception")
         self.logger.info("Hand perception plugin stopped")
