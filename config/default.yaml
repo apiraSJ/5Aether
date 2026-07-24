@@ -1,14 +1,29 @@
-# default.yaml
-camera:
-  device_index: 0
-  width: 640
-  height: 480
-model:
-  weights: "yolov8n.pt"  # downloaded at root
-  confidence: 0.25
+app:
+  name: "Aether"
+  version: "0.2.0"
+  tick_rate: 30
+
 logging:
   level: "INFO"
+  console: true
   file: "logs/aether.log"
-hud:
-  show_fps: true
-  show_telemetry: true
+
+event_bus:
+  queued: true
+
+plugins:
+  - module: "aether.plugins.memory_plugin"
+    class: "MemoryPlugin"
+    enabled: true
+  - module: "aether.plugins.history_plugin"
+    class: "HistoryPlugin"
+    enabled: true
+  - module: "aether.plugins.system_plugin"
+    class: "SystemPlugin"
+    enabled: true
+  - module: "aether.plugins.keyboard_plugin"
+    class: "KeyboardInputPlugin"
+    enabled: true
+  - module: "aether.plugins.gui_plugin"
+    class: "GUIPlugin"
+    enabled: true
