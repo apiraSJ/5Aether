@@ -19,11 +19,18 @@ from __future__ import annotations
 
 import logging
 import os
-import readline
 import sys
 import threading
 from collections import deque
 from typing import Any, Optional
+
+try:
+    import readline
+except ImportError:
+    try:
+        import pyreadline3 as readline
+    except ImportError:
+        readline = None  # degraded mode — no tab-completion
 
 from aether.core.command import Command
 from aether.core.command_registry import CommandRegistry
@@ -114,6 +121,10 @@ class CLIPlugin(TickablePlugin):
 
     def _setup_readline(self) -> None:
         """Configure readline with tab-completion from CommandRegistry."""
+        if readline is None:
+            logger.info("readline not available — tab-completion disabled")
+            return
+
         readline.parse_and_bind("tab: complete")
         readline.set_completer(self._completer)
         readline.set_completer_delims(" \t\n")
@@ -145,6 +156,8 @@ class CLIPlugin(TickablePlugin):
 
     def _save_history(self) -> None:
         """Persist readline history to disk."""
+        if readline is None:
+            return
         history_path = os.path.expanduser("~/.aether_cli_history")
         try:
             readline.write_history_file(history_path)

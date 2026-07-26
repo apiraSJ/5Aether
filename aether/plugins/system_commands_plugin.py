@@ -157,6 +157,8 @@ class SystemCommandPlugin(PluginBase):
         self._command_bus.register_handler("system.shutdown", self._handle_shutdown)
         self._command_bus.register_handler("cli.history", self._handle_history)
         self._command_bus.register_handler("cli.clear", self._handle_clear)
+        self._command_bus.register_handler("cursor_click", self._handle_cursor_click)
+        self._command_bus.register_handler("cursor_move", self._handle_cursor_move)
 
         logger.info("System commands registered (%d commands)", len(_SYSTEM_COMMANDS))
 
@@ -224,3 +226,9 @@ class SystemCommandPlugin(PluginBase):
     def _handle_clear(self, command: Command) -> dict:
         os.system("cls" if os.name == "nt" else "clear")
         return {"message": ""}
+
+    def _handle_cursor_click(self, command: Command) -> dict:
+        return {"message": "click", "hand": command.params.get("hand", "?")}
+
+    def _handle_cursor_move(self, command: Command) -> dict:
+        return None

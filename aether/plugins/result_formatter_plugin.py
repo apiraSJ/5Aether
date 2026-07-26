@@ -42,7 +42,7 @@ class ResultFormatterPlugin(PluginBase):
         self._silent_commands: set[str] = {
             "system.ping", "system.tick", "system.info",
             "vision.scan",
-            "cursor.move",
+            "cursor.move", "cursor_click",
             "input.gesture",
         }
         # Prefixes for high-frequency commands (any cmd starting with these is silent)

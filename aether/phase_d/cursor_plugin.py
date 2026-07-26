@@ -5,6 +5,8 @@ Maps normalized hand coordinates to screen coordinates and emits cursor commands
 Integrates with the existing cursor_manager logic from legacy.
 """
 
+import time
+
 import numpy as np
 from aether.core.plugin import PluginBase
 from aether.core.command import Command
@@ -157,6 +159,8 @@ class PinchClickPlugin(PluginBase):
         self._running = False
         self._pinch_threshold = 0.08
         self._pinch_active = {}
+        self._click_cooldown = 0.3  # seconds between clicks per hand
+        self._last_click_time = {}
     
     def initialize(self, container):
         self.event_bus = container.resolve("event_bus")
@@ -195,7 +199,12 @@ class PinchClickPlugin(PluginBase):
             was_pinching = self._pinch_active.get(label, False)
             
             if is_pinching and not was_pinching:
-                # Pinch started - emit click
+                # Pinch started - emit click (with debounce per hand)
+                now = time.monotonic()
+                last = self._last_click_time.get(label, 0.0)
+                if now - last < self._click_cooldown:
+                    continue
+                self._last_click_time[label] = now
                 self._pinch_active[label] = True
                 if self.command_bus:
                     cmd = Command(

@@ -103,8 +103,9 @@ plugins:
   - module: "aether.phase_c.gesture_input_plugin"
     class: "GestureInputPlugin"
 
-  - module: "aether.phase_c.gesture_input_plugin"
-    class: "PinchGesturePlugin"
+  # PinchGesturePlugin disabled — PinchClickPlugin already handles pinch→click
+  # - module: "aether.phase_c.gesture_input_plugin"
+  #   class: "PinchGesturePlugin"
 
 cursor:
   smoothing: 0.15
