@@ -8,13 +8,13 @@ Integrates with the existing cursor_manager logic from legacy.
 import numpy as np
 from aether.core.plugin import PluginBase
 from aether.core.command import Command
-from aether.core.event_bus import EventBus
+from aether.core.event_bus_v2 import EventBus
 
 
 class CursorPlugin(PluginBase):
     """Handles cursor position from hand landmarks.
     
-    Subscribes to vision_hand_detected, extracts index finger tip,
+    Subscribes to vision.hand.detected, extracts index finger tip,
     maps to screen coordinates, emits cursor_move commands.
     """
     
@@ -56,19 +56,19 @@ class CursorPlugin(PluginBase):
             self._sensitivity = cursor_cfg.get("sensitivity", self._sensitivity)
             self._dead_zone = cursor_cfg.get("dead_zone", self._dead_zone)
         
-        self.event_bus.subscribe("vision_hand_detected", self._on_hand_detected)
+        self.event_bus.subscribe("vision.hand.detected", self._on_hand_detected)
         self._running = True
     
     def shutdown(self):
         self._running = False
         if self.event_bus:
-            self.event_bus.unsubscribe("vision_hand_detected", self._on_hand_detected)
+            self.event_bus.unsubscribe("vision.hand.detected", self._on_hand_detected)
     
     def _on_hand_detected(self, event):
         if not self._running:
             return
         
-        hands = event.data.get("hands", [])
+        hands = event.payload.get("hands", [])
         if not hands:
             return
         
@@ -162,19 +162,19 @@ class PinchClickPlugin(PluginBase):
         self.event_bus = container.resolve("event_bus")
         self.command_bus = container.resolve("command_bus")
         
-        self.event_bus.subscribe("vision_hand_detected", self._on_hand_detected)
+        self.event_bus.subscribe("vision.hand.detected", self._on_hand_detected)
         self._running = True
     
     def shutdown(self):
         self._running = False
         if self.event_bus:
-            self.event_bus.unsubscribe("vision_hand_detected", self._on_hand_detected)
+            self.event_bus.unsubscribe("vision.hand.detected", self._on_hand_detected)
     
     def _on_hand_detected(self, event):
         if not self._running:
             return
         
-        hands = event.data.get("hands", [])
+        hands = event.payload.get("hands", [])
         for hand in hands:
             label = hand.get("label", "Unknown")
             landmarks = hand.get("landmarks", [])

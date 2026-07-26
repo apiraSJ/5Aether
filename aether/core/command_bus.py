@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Deque, List, Optional
 
 from aether.core.command import Command
+from aether.core.command_result import CommandResult
 from aether.core.result_pipeline import ResultPipeline
 from aether.core.service_container import ServiceContainer
 
@@ -178,7 +179,15 @@ class CommandBus:
 
                 # Publish success via ResultPipeline
                 if self._result_pipeline:
-                    self._result_pipeline.publish(command, "complete", {"result": result})
+                    cmd_result = CommandResult.ok(
+                        command_id=command.id,
+                        command_name=command.name,
+                        message=f"Command {command.name} completed",
+                        data={"result": result},
+                        notification="toast",
+                    )
+                    cmd_result.duration_ms = duration_ms
+                    self._result_pipeline.publish(cmd_result)
 
                 return result
             else:
@@ -187,7 +196,12 @@ class CommandBus:
                 logger.warning("No handler for command: %s", command.name)
                 self._emit("command.completed", command)
                 if self._result_pipeline:
-                    self._result_pipeline.publish(command, "warning", "No handler registered")
+                    cmd_result = CommandResult.ok(
+                        command_id=command.id,
+                        command_name=command.name,
+                        message="No handler registered",
+                    )
+                    self._result_pipeline.publish(cmd_result)
                 return command
 
         except Exception as e:
@@ -199,7 +213,14 @@ class CommandBus:
             self._emit("command.failed", command, {"duration_ms": duration_ms, "error": str(e)})
 
             if self._result_pipeline:
-                self._result_pipeline.publish(command, "error", str(e))
+                cmd_result = CommandResult.fail(
+                    command_id=command.id,
+                    command_name=command.name,
+                    error=str(e),
+                    notification="toast",
+                )
+                cmd_result.duration_ms = duration_ms
+                self._result_pipeline.publish(cmd_result)
             raise
 
     def _execute_with_timeout(

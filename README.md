@@ -8,21 +8,40 @@ Aether is a modular, event-driven AI Spatial Assistant for desktop today, archit
 
 ## Quick Start
 
+### Windows (one-click)
+
+```
+git clone <repo-url> Aether
+cd Aether
+setup.bat       # creates venv + installs everything
+start.bat       # launches Aether
+```
+
+### Any platform
+
 ```bash
 git clone <repo-url> Aether
 cd Aether
 python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-python -m pytest tests/ -v    # Verify all tests pass
+.venv\Scripts\activate          # Windows
+pip install -e ".[full]"        # install with all extras
+python -m aether                # headless boot
 ```
 
-```bash
-# Vision pipeline (camera + YOLO + gestures + HUD dashboard)
-python main.py
+### Run modes
 
-# Brain-only mode (PySide6 overlay + hotkeys + commands, no camera)
-python brain_main.py
+```bash
+python -m aether                        # headless — boot proof + idle
+python -m aether --mode tick            # 30Hz tick loop with plugins
+python -m aether --mode headless        # same as default
+python -m aether --strict-plugins       # fail-fast on plugin errors
+python start.py --tick                  # cross-platform launcher
+```
+
+### Tests
+
+```bash
+python -m pytest tests/phase_a/ -v
 ```
 
 ---

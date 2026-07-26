@@ -142,8 +142,8 @@ class VoiceCommandPlugin(PluginBase):
         if not self._running:
             return
         
-        text = event.data.get("text", "").lower()
-        confidence = event.data.get("confidence", 1.0)
+        text = event.payload.get("text", "").lower()
+        confidence = event.payload.get("confidence", 1.0)
         
         # Minimum confidence threshold
         if confidence < 0.7:

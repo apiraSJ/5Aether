@@ -1,0 +1,97 @@
+# Vision mode configuration for Aether v2
+# One-Way Data Flow Architecture:
+#   Camera → FrameBroker → YOLO/MediaPipe → PerceptionResult → VisionEventAdapter → EventBus → Widgets
+
+app:
+  name: "Aether"
+  version: "0.3.0"
+  tick_rate: 30
+  mode: "vision"
+
+logging:
+  level: "INFO"
+  console: true
+  file: "logs/aether_vision.log"
+
+event_bus:
+  queued: true
+
+adaptive_scheduler:
+  debug: false
+
+plugins:
+  # ── Core infrastructure ──────────────────────────────────────────
+  - module: "aether.plugins.system_plugin"
+    class: "SystemPlugin"
+
+  - module: "aether.plugins.keyboard_plugin"
+    class: "KeyboardInputPlugin"
+
+  - module: "aether.plugins.gui_plugin"
+    class: "GUIPlugin"
+
+  # ── Frame infrastructure ─────────────────────────────────────────
+  - module: "aether.phase_d.hand_plugin"
+    class: "FrameBrokerPlugin"
+
+  # ── Vision pipeline (perception → result → adapter) ──────────────
+  - module: "aether.vision.plugins"
+    class: "PerceptionPlugin"
+
+  - module: "aether.vision.plugins"
+    class: "VisionAdapterPlugin"
+
+  # ── Camera (writes to FrameBroker) ──────────────────────────────
+  - module: "aether.phase_d.camera_plugin"
+    class: "CameraPlugin"
+    config:
+      device_index: 0
+      width: 640
+      height: 480
+      fps: 30
+
+  # ── Perception plugins (write to PerceptionResult) ───────────────
+  - module: "aether.phase_d.hand_plugin"
+    class: "HandPerceptionPlugin"
+    config:
+      model_path: "models/gesture_recognizer.task"
+      num_hands: 2
+      min_hand_detection_confidence: 0.3
+      min_hand_presence_confidence: 0.3
+      min_tracking_confidence: 0.3
+
+  - module: "aether.phase_d.object_plugin"
+    class: "ObjectSpatialPlugin"
+    config:
+      model_path: "yolov8n.pt"
+      confidence: 0.25
+      imgsz: 320
+
+  # ── Input adapters (subscribe to EventBus events) ────────────────
+  - module: "aether.phase_d.cursor_plugin"
+    class: "CursorPlugin"
+    config:
+      screen_width: 1920
+      screen_height: 1080
+      camera_width: 640
+      camera_height: 480
+      mirror_x: true
+      smoothing: 0.15
+      sensitivity: 2.0
+      dead_zone: 1
+
+  - module: "aether.phase_d.cursor_plugin"
+    class: "PinchClickPlugin"
+
+  - module: "aether.phase_c.gesture_input_plugin"
+    class: "GestureInputPlugin"
+
+  - module: "aether.phase_c.gesture_input_plugin"
+    class: "PinchGesturePlugin"
+
+cursor:
+  smoothing: 0.15
+  dead_zone: 1
+  sensitivity: 2.0
+  prediction: 0.12
+  mirror_x: true

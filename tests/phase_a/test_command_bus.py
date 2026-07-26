@@ -1,8 +1,8 @@
 """Tests for CommandBus — dispatch, async handlers, exceptions, ResultPipeline."""
 from aether.core.command import Command
-from aether.core.command_bus import CommandBus, CommandNotRegisteredError
+from aether.core.command_bus import CommandBus
 from aether.core.command_result import CommandResult
-from aether.core.event_bus import EventBus, EventCategory
+from aether.core.event_bus_v2 import EventBus, Event
 from aether.core.result_pipeline import ResultPipeline
 
 
@@ -11,88 +11,83 @@ def _make_command(name="test.cmd"):
 
 
 class TestCommandBusSync:
-    def test_dispatch_success(self):
-        bus = CommandBus()
-        bus.register("test.cmd", lambda c: CommandResult.ok(c.id, c.name, message="done"))
-        result = bus.dispatch(_make_command())
-        assert result.success
-        assert result.message == "done"
-
-    def test_dispatch_unregistered(self):
-        bus = CommandBus()
-        result = bus.dispatch(_make_command("nope"))
-        assert not result.success
-        assert "No handler" in result.error
-
     def test_dispatch_handler_exception(self):
         bus = CommandBus()
 
         def bad(c):
             raise RuntimeError("boom")
 
-        bus.register("test.cmd", bad)
-        result = bus.dispatch(_make_command())
-        assert not result.success
-        assert "boom" in result.error
-
-    def test_dispatch_wrong_return_type(self):
-        bus = CommandBus()
-        bus.register("test.cmd", lambda c: "not a result")
-        result = bus.dispatch(_make_command())
-        assert not result.success
-        assert "CommandResult" in result.error
+        bus.register_handler("test.cmd", bad)
+        cmd = _make_command()
+        try:
+            bus.dispatch_sync(cmd, timeout=5.0)
+            assert False, "Should have raised"
+        except RuntimeError as e:
+            assert "boom" in str(e)
+        assert cmd.status == "FAILED"
+        assert "boom" in cmd.error
 
     def test_unregister(self):
         bus = CommandBus()
-        bus.register("test.cmd", lambda c: CommandResult.ok(c.id, c.name))
-        bus.unregister("test.cmd")
+        bus.register_handler("test.cmd", lambda c: "ok")
+        bus.unregister_handler("test.cmd")
         assert not bus.is_registered("test.cmd")
 
     def test_is_registered(self):
         bus = CommandBus()
         assert not bus.is_registered("x")
-        bus.register("x", lambda c: CommandResult.ok(c.id, c.name))
+        bus.register_handler("x", lambda c: "ok")
         assert bus.is_registered("x")
 
-    def test_duration_ms_set(self):
+    def test_queue_depth(self):
         bus = CommandBus()
-        bus.register("test.cmd", lambda c: CommandResult.ok(c.id, c.name))
-        result = bus.dispatch(_make_command())
-        assert result.duration_ms >= 0
-
-    def test_result_pipeline_called(self):
-        bus_evt = EventBus()
-        pipeline = ResultPipeline(bus_evt)
-        bus = CommandBus(pipeline)
-
-        events = []
-        bus_evt.subscribe_category(EventCategory.COMMAND, lambda e: events.append(e))
-
-        bus.register("test.cmd", lambda c: CommandResult.ok(c.id, c.name))
+        assert bus.queue_depth == 0
         bus.dispatch(_make_command())
-        assert len(events) == 1
-        assert events[0].name == "CommandCompleted"
+        assert bus.queue_depth == 1
 
-
-class TestCommandBusAsync:
-    def test_async_handler(self):
+    def test_update_processes_queue(self):
         bus = CommandBus()
+        bus.register_handler("test.cmd", lambda c: "ok")
+        bus.dispatch(_make_command())
+        processed = bus.update()
+        assert processed == 1
+        assert bus.queue_depth == 0
 
-        async def handler(c):
-            return CommandResult.ok(c.id, c.name, message="async_ok")
-
-        bus.register("test.cmd", handler)
-        result = bus.dispatch(_make_command())
-        assert result.success
-        assert result.message == "async_ok"
-
-    def test_async_handler_exception(self):
+    def test_clear_history(self):
         bus = CommandBus()
+        bus.register_handler("test.cmd", lambda c: "ok")
+        bus.dispatch_sync(_make_command())
+        removed = bus.clear_history(max_age=-1)
+        assert removed >= 1
 
-        async def bad(c):
-            raise RuntimeError("async_boom")
 
-        bus.register("test.cmd", bad)
-        result = bus.dispatch(_make_command())
-        assert not result.success
-        assert "async_boom" in result.error
+class TestCommandBusResultPipeline:
+    def test_result_pipeline_called_on_success(self):
+        pipeline = ResultPipeline()
+        bus = CommandBus(result_pipeline=pipeline)
+
+        results = []
+        pipeline.add_handler("success", lambda r: results.append(r))
+
+        bus.register_handler("test.cmd", lambda c: "ok")
+        bus.dispatch_sync(_make_command())
+        assert len(results) == 1
+        assert results[0].success
+
+    def test_result_pipeline_called_on_failure(self):
+        pipeline = ResultPipeline()
+        bus = CommandBus(result_pipeline=pipeline)
+
+        results = []
+        pipeline.add_handler("error", lambda r: results.append(r))
+
+        def bad(c):
+            raise RuntimeError("boom")
+
+        bus.register_handler("test.cmd", bad)
+        try:
+            bus.dispatch_sync(_make_command())
+        except RuntimeError:
+            pass
+        assert len(results) == 1
+        assert not results[0].success

@@ -104,8 +104,8 @@ class KeyboardEventPlugin(PluginBase):
         if not self._running:
             return
         
-        key = event.data.get("key", "")
-        action = event.data.get("action", "press")
+        key = event.payload.get("key", "")
+        action = event.payload.get("action", "press")
         
         # Map key to command
         cmd_map = {
@@ -129,6 +129,6 @@ class KeyboardEventPlugin(PluginBase):
         if not self._running:
             return
         
-        hotkey = event.data.get("hotkey", "")
+        hotkey = event.payload.get("hotkey", "")
         # Could map complex hotkeys here
         pass

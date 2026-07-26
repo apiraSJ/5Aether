@@ -24,6 +24,8 @@ from aether.core.command_bus import CommandBus
 from aether.core.event_bus_v2 import EventBus
 from aether.core.plugin_loader import PluginLoader
 from aether.core.result_pipeline import ResultPipeline
+from aether.core.profiler import profiler
+from aether.core.adaptive_scheduler import adaptive_scheduler
 from aether.core.service_container import ServiceContainer
 from aether.core.service import IService
 
@@ -110,6 +112,14 @@ class AetherApplication:
         self.container.register_instance("command_bus", self.command_bus)
         self.container.register_instance("application", self)
 
+        # Register AdaptiveScheduler for vision/render scheduling
+        from aether.core.adaptive_scheduler import adaptive_scheduler
+        scheduler_debug = self.config.get("adaptive_scheduler.debug", False)
+        adaptive_scheduler._debug = scheduler_debug
+        self.container.register_instance("adaptive_scheduler", adaptive_scheduler)
+        if scheduler_debug:
+            logger.info("AdaptiveScheduler debug logging enabled")
+
         # 5. Plugin system
         self.plugin_loader = PluginLoader(self.container, strict_mode=self.strict_plugins)
 
@@ -174,6 +184,8 @@ class AetherApplication:
           4. Plugins.update(dt) - input polling
           5. EventBus.flush() - deliver queued events (deterministic ordering)
         """
+        profiler.tick_begin(budget_ms=1000.0 / self._tick_rate)
+
         now = time.perf_counter()
         dt = now - self._last_tick_time
         self._last_tick_time = now
@@ -196,8 +208,26 @@ class AetherApplication:
         if self.event_bus:
             self.event_bus.flush()
 
-        # 5. Rate limiting (simple sleep to target Hz)
+        # 5. Update frame age from FrameBroker (always — not gated by skip)
+        if self.container and self.container.has("frame_broker"):
+            broker = self.container.resolve("frame_broker")
+            capture_ts = broker.get_capture_ts()
+            if capture_ts > 0:
+                frame_age_ms = (time.perf_counter() - capture_ts) * 1000.0
+                profiler.set_frame_age(frame_age_ms)
+
+        # 6. Update adaptive scheduler (for vision/render rate control)
+        adaptive_scheduler.update()
+
+        # 7. Rate limiting (simple sleep to target Hz)
         self._rate_limit(dt)
+
+        # 8. Tick end (compute overrun)
+        profiler.tick_end()
+
+        # 7. Profiler summary (every 1 second)
+        if profiler.should_log():
+            profiler.log_summary()
 
     def shutdown(self) -> None:
         """Graceful shutdown. Safe to call multiple times."""
@@ -304,7 +334,10 @@ class AetherApplication:
         for plugin in self.plugin_loader.loaded_plugins:
             if isinstance(plugin, TickablePlugin):
                 try:
+                    t0 = time.perf_counter()
                     plugin.update(dt)
+                    ms = (time.perf_counter() - t0) * 1000.0
+                    profiler.record_plugin_time(plugin.name, ms)
                 except Exception:
                     logger.exception("Tickable plugin %s update failed", plugin.name)
 

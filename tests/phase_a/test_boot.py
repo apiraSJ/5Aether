@@ -26,17 +26,19 @@ class TestAetherBoot:
         app.boot()
         plugins = app.plugin_loader.loaded_plugins
         assert len(plugins) >= 1
-        assert plugins[0].name == "system_info_plugin"
+        plugin_names = [p.name for p in plugins]
+        assert "system_plugin" in plugin_names
         app.shutdown()
 
     def test_boot_proof_dispatch(self):
         app = AetherApp()
         app.boot()
-        result = app.command_bus.dispatch(
+        result = app.command_bus.dispatch_sync(
             Command(name="system.ping", source="test", params={"echo": True})
         )
-        assert result.success
-        assert result.message == "pong"
+        assert isinstance(result, dict)
+        assert result["status"] == "ok"
+        assert result["message"] == "pong"
         app.shutdown()
 
     def test_boot_idempotent(self):

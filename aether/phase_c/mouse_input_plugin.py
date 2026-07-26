@@ -115,9 +115,9 @@ class MouseEventPlugin(PluginBase):
         if not self._running or not self.command_bus:
             return
         
-        action = event.data.get("action", "")
-        x = event.data.get("x", 0)
-        y = event.data.get("y", 0)
+        action = event.payload.get("action", "")
+        x = event.payload.get("x", 0)
+        y = event.payload.get("y", 0)
         
         if action == "click":
             cmd = Command(

@@ -11,18 +11,29 @@ import threading
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Union
+
+from aether.core.event_type import EventType
+from aether.core.profiler import profiler
 
 logger = logging.getLogger("Aether.EventBusV2")
 
 
 @dataclass(slots=True)
 class Event:
-    """Immutable event payload."""
+    """Immutable event payload.
 
-    type: str
+    Attributes:
+        type:       The event type (unified EventType enum).
+        payload:    Event-specific data dictionary.
+        source:     Identifier of the component that emitted this event.
+        timestamp:  Unix timestamp of event creation.
+    """
+
+    type: Union[EventType, str]
     payload: dict[str, Any] = field(default_factory=dict)
     source: str = ""
+    timestamp: float = field(default_factory=lambda: __import__("time").time)
 
 
 class EventBus:
@@ -55,19 +66,25 @@ class EventBus:
 
     # --- Subscribe / Unsubscribe ---
 
-    def subscribe(self, event_type: str, callback: Callable[[Event], None]) -> None:
-        """Register callback for event_type. Thread-safe."""
-        with self._lock:
-            if callback not in self._subscribers[event_type]:
-                self._subscribers[event_type].append(callback)
-                logger.debug("Subscribed %s to %s", callback.__qualname__, event_type)
+    def subscribe(self, event_type: Union[EventType, str], callback: Callable[[Event], None]) -> None:
+        """Register callback for event_type. Thread-safe.
 
-    def unsubscribe(self, event_type: str, callback: Callable[[Event], None]) -> None:
-        """Remove callback. Thread-safe."""
+        event_type can be EventType enum or string for backward compatibility.
+        """
+        # Normalize to string for internal storage
+        key = event_type.value if isinstance(event_type, EventType) else event_type
         with self._lock:
-            if callback in self._subscribers[event_type]:
-                self._subscribers[event_type].remove(callback)
-                logger.debug("Unsubscribed %s from %s", callback.__qualname__, event_type)
+            if callback not in self._subscribers[key]:
+                self._subscribers[key].append(callback)
+                logger.debug("Subscribed %s to %s", callback.__qualname__, key)
+
+    def unsubscribe(self, event_type: Union[EventType, str], callback: Callable[[Event], None]) -> None:
+        """Remove callback. Thread-safe."""
+        key = event_type.value if isinstance(event_type, EventType) else event_type
+        with self._lock:
+            if callback in self._subscribers[key]:
+                self._subscribers[key].remove(callback)
+                logger.debug("Unsubscribed %s from %s", callback.__qualname__, key)
 
     # --- Publish ---
 
@@ -81,11 +98,12 @@ class EventBus:
 
         if self._queued:
             with self._lock:
+                event.timestamp = __import__("time").perf_counter()
                 self._queue.append(event)
         else:
             self._deliver(event)
 
-    def publish_now(self, event_type: str, payload: dict[str, Any] = None, source: str = "") -> None:
+    def publish_now(self, event_type: Union[EventType, str], payload: dict[str, Any] = None, source: str = "") -> None:
         """Convenience: create and publish immediately (bypasses queue even in queued mode).
         Use sparingly — only for system-critical events that must not wait.
         """
@@ -97,9 +115,19 @@ class EventBus:
         """Deliver all queued events to subscribers. Returns count delivered.
         Call exactly once per tick from Application.tick().
         """
+        t0 = __import__("time").perf_counter()
+
         with self._lock:
             if not self._queue:
                 return 0
+
+            # Compute oldest event age
+            now = __import__("time").perf_counter()
+            oldest_ms = 0.0
+            if self._queue:
+                oldest_ts = self._queue[0].timestamp
+                oldest_ms = (now - oldest_ts) * 1000.0
+
             events = self._queue[:]
             self._queue.clear()
 
@@ -107,6 +135,10 @@ class EventBus:
         for event in events:
             self._deliver(event)
             delivered += 1
+
+        ms = (__import__("time").perf_counter() - t0) * 1000.0
+        profiler._record_stage("eventbus_flush", ms)
+        profiler.set_queue("eventbus", queued=len(self._queue), flush_ms=ms, oldest_ms=oldest_ms)
 
         logger.debug("Flushed %d events", delivered)
         return delivered
@@ -127,21 +159,25 @@ class EventBus:
 
     def _deliver(self, event: Event) -> None:
         """Call all subscribers for event.type. Exceptions logged, not propagated."""
+        # Normalize event type to string for subscriber lookup
+        event_key = event.type.value if isinstance(event.type, EventType) else event.type
+
         # Snapshot subscribers under lock to avoid holding lock during callbacks
         with self._lock:
-            subscribers = list(self._subscribers.get(event.type, []))
+            subscribers = list(self._subscribers.get(event_key, []))
 
         for callback in subscribers:
             try:
                 callback(event)
             except Exception:
-                logger.exception("Subscriber %s raised for event %s", callback.__qualname__, event.type)
+                logger.exception("Subscriber %s raised for event %s", callback.__qualname__, event_key)
 
     # --- Debug / Introspection ---
 
-    def get_subscriber_count(self, event_type: str) -> int:
+    def get_subscriber_count(self, event_type: Union[EventType, str]) -> int:
+        key = event_type.value if isinstance(event_type, EventType) else event_type
         with self._lock:
-            return len(self._subscribers.get(event_type, []))
+            return len(self._subscribers.get(key, []))
 
     def get_all_event_types(self) -> list[str]:
         with self._lock:

@@ -1,1 +1,3 @@
-"""Aether — Hardware-Independent Cognitive Architecture with Persistent Spatial Memory."""
+"""Aether — Command-Driven Spatial AI Operating System."""
+
+__version__ = "0.2.0"

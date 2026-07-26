@@ -83,6 +83,7 @@ class AetherApp:
         self.container.register_instance("event_bus", self.event_bus)
         self.container.register_instance("result_pipeline", self.result_pipeline)
         self.container.register_instance("command_bus", self.command_bus)
+        self.container.register_instance("application", self)
 
         self.plugin_loader = PluginLoader(self.container, strict_mode=self.strict_plugins)
 

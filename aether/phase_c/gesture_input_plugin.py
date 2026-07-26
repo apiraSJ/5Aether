@@ -44,19 +44,19 @@ class GestureInputPlugin(PluginBase):
         
         self._running = True
         # Subscribe to hand detection events from Phase D plugin
-        self.event_bus.subscribe("vision_hand_detected", self._on_hand_detected)
+        self.event_bus.subscribe("vision.hand.detected", self._on_hand_detected)
     
     def shutdown(self):
         self._running = False
         if self.event_bus:
-            self.event_bus.unsubscribe("vision_hand_detected", self._on_hand_detected)
+            self.event_bus.unsubscribe("vision.hand.detected", self._on_hand_detected)
     
     def _on_hand_detected(self, event):
         """Process hand detection event and dispatch gesture commands."""
         if not self._running or not self.command_bus:
             return
         
-        hands = event.data.get("hands", [])
+        hands = event.payload.get("hands", [])
         
         for hand in hands:
             gesture = hand.get("gesture", "Unknown")
@@ -117,18 +117,18 @@ class PinchGesturePlugin(PluginBase):
         self.command_bus = container.resolve("command_bus")
         
         self._running = True
-        self.event_bus.subscribe("vision_hand_detected", self._on_hand_detected)
+        self.event_bus.subscribe("vision.hand.detected", self._on_hand_detected)
     
     def shutdown(self):
         self._running = False
         if self.event_bus:
-            self.event_bus.unsubscribe("vision_hand_detected", self._on_hand_detected)
+            self.event_bus.unsubscribe("vision.hand.detected", self._on_hand_detected)
     
     def _on_hand_detected(self, event):
         if not self._running or not self.command_bus:
             return
         
-        hands = event.data.get("hands", [])
+        hands = event.payload.get("hands", [])
         
         for hand in hands:
             landmarks = hand.get("landmarks", [])
