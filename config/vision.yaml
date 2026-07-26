@@ -30,6 +30,22 @@ plugins:
   - module: "aether.plugins.gui_plugin"
     class: "GUIPlugin"
 
+  # ── Command system (must load before input adapters) ─────────────
+  - module: "aether.plugins.system_commands_plugin"
+    class: "SystemCommandPlugin"
+
+  - module: "aether.plugins.rule_intent_plugin"
+    class: "RuleIntentPlugin"
+
+  - module: "aether.plugins.intent_resolver_plugin"
+    class: "IntentResolverPlugin"
+
+  - module: "aether.plugins.result_formatter_plugin"
+    class: "ResultFormatterPlugin"
+
+  - module: "aether.plugins.cli_plugin"
+    class: "CLIPlugin"
+
   # ── Frame infrastructure ─────────────────────────────────────────
   - module: "aether.phase_d.hand_plugin"
     class: "FrameBrokerPlugin"

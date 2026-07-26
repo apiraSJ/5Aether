@@ -45,6 +45,10 @@ class EventType(str, Enum):
     INPUT_GESTURE = "input.gesture"
     INPUT_VOICE = "input.voice"
 
+    # ── CLI ───────────────────────────────────────────────────────────
+    CLI_INPUT_RECEIVED = "cli.input.received"
+    CLI_OUTPUT_DISPLAYED = "cli.output.displayed"
+
     # ── Vision (perception output) ─────────────────────────────────────────
     VISION_CAMERA_STARTED = "vision.camera.started"
     VISION_CAMERA_STOPPED = "vision.camera.stopped"

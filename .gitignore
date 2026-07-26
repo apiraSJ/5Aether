@@ -1,10 +1,26 @@
+# Python
 __pycache__/
 *.pyc
 *.pyo
 *.egg-info/
 dist/
 build/
-.pytest_cache/
+.eggs/
+
+# Virtual environment
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Profiling artifacts
+profile_results.txt
+profile_data.txt
+demo_output.txt
+vision_log.txt
 logs/
-*.zip
-.env
+
+# OS
+Thumbs.db
+.DS_Store
