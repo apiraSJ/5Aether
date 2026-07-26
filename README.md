@@ -1,8 +1,10 @@
 # Aether — AI Spatial Assistant
 
-> Build the brain before giving it better eyes.
+> Make the brain useful to people.
 
-Aether is a modular, event-driven AI Spatial Assistant for desktop today, architected for XR Smart Glasses tomorrow. It combines computer vision (MediaPipe GestureRecognizer + YOLOv8), spatial awareness (solvePnP), memory, task management, and a command system into a single extensible platform.
+Aether is a command-driven AI Spatial Assistant with a plugin-based runtime, event-driven architecture, and vision pipeline. Built for desktop today, architected for XR Smart Glasses tomorrow.
+
+**Backend v1.0.0** — Architecture Stable (tagged `backend-v1.0.0`)
 
 ---
 
@@ -10,11 +12,11 @@ Aether is a modular, event-driven AI Spatial Assistant for desktop today, archit
 
 ### Windows (one-click)
 
-```
+```bat
 git clone <repo-url> Aether
 cd Aether
-setup.bat       # creates venv + installs everything
-start.bat       # launches Aether
+scripts\setup.bat       # creates venv + installs everything
+scripts\start.bat       # launches Aether in vision mode
 ```
 
 ### Any platform
@@ -23,71 +25,84 @@ start.bat       # launches Aether
 git clone <repo-url> Aether
 cd Aether
 python -m venv .venv
-.venv\Scripts\activate          # Windows
-pip install -e ".[full]"        # install with all extras
-python -m aether                # headless boot
+.venv\Scripts\activate              # Windows
+pip install -e ".[full]"            # install with all extras
+python -m aether --mode vision      # launch with camera + GUI
 ```
 
 ### Run modes
 
 ```bash
-python -m aether                        # headless — boot proof + idle
-python -m aether --mode tick            # 30Hz tick loop with plugins
-python -m aether --mode headless        # same as default
-python -m aether --strict-plugins       # fail-fast on plugin errors
-python start.py --tick                  # cross-platform launcher
+python -m aether --mode vision       # Full vision pipeline + GUI overlay
+python -m aether --profile           # Performance profiling (30s default)
+python -m aether --profile --duration 60  # Custom duration
+```
+
+### Profiling
+
+```bat
+scripts\profile.bat 30       # 30-second hardware validation
 ```
 
 ### Tests
 
 ```bash
-python -m pytest tests/phase_a/ -v
+python -m pytest tests/ -v
 ```
 
 ---
 
-## Architecture Overview
+## Architecture
+
+### One-Way Data Flow
 
 ```text
-                          ┌──────────────────────────┐
-                          │         AETHER            │
-                          │                           │
-                          │   ┌───────────────────┐   │
-                          │   │     EventBus       │   │
-                          │   │  (69 event types)  │   │
-                          │   └──────┬────┬────┬──┘   │
-                          │          │    │    │       │
-                          │     ┌────┘ ┌──┘ ┌──┘      │
-                          │     ▼      ▼    ▼          │
-                          │  Memory  Tasks  Commands   │
-                          │     ▲      ▲    ▲          │
-                          │  JSON    JSON  Handler     │
-                          │                           │
-                          │   ┌───────────────────┐   │
-                          │   │ Perception Pipeline │   │
-                          │   │  ┌─────┐ ┌─────┐  │   │
-                          │   │  │Hand │ │YOLO │  │   │
-                          │   │  │Plug.│ │Plug.│  │   │
-                          │   │  └──┬──┘ └──┬──┘  │   │
-                          │   │     └───┬────┘     │   │
-                          │   │   ┌─────▼──────┐  │   │
-                          │   │   │ FrameBroker │  │   │
-                          │   │   └─────┬──────┘  │   │
-                          │   └─────────┼─────────┘   │
-                          │        ┌────▼────┐        │
-                          │        │ Camera   │        │
-                          │        └─────────┘        │
-                          └──────────────────────────┘
+Camera ──▶ FrameBroker ──▶ YOLO / MediaPipe ──▶ PerceptionResult
+                                                       │
+                                                       ▼
+                                               VisionEventAdapter
+                                                       │
+                                                       ▼
+                                                  EventBus (queued)
+                                                       │
+                                                       ▼
+                                              OverlayController ──▶ OverlayModel ──▶ Widgets
 ```
 
-### Two Entry Points
+### Core Systems
 
-| Entry Point | UI Framework | Purpose | Command |
-|-------------|-------------|---------|---------|
-| `main.py` | DearPyGui + OpenCV | Camera pipeline — gesture recognition, YOLO detection, HUD overlay | `python main.py` |
-| `brain_main.py` | PySide6 overlay | Brain-only — hotkeys, commands, memory, context (no camera) | `python brain_main.py` |
+| System | Purpose |
+|--------|---------|
+| **EventBus** | Thread-safe pub/sub, queued delivery, 70+ event types |
+| **CommandBus** | Command dispatch with handlers, lifecycle events |
+| **ResultPipeline** | CommandResult → notification, history, layout |
+| **FrameBroker** | Central frame distribution, overwrite tracking |
+| **AdaptiveScheduler** | Dynamic rate control based on profiler metrics |
+| **DI Container** | Service registration and resolution |
+| **Plugin System** | `PluginBase` / `TickablePlugin` with config from YAML |
 
-Both share the same EventBus, memory, command, and context systems.
+### Data Flow: Input → Command → Result
+
+```text
+[CLI]  [Camera]  [Gesture]  [Keyboard]  [Voice]
+  │       │         │           │          │
+  └───────┴─────────┴───────────┴──────────┘
+                    │
+                    ▼
+         EventBus: CLI_INPUT_RECEIVED / vision.*
+                    │
+                    ▼
+         IntentResolver → resolve text → Command
+                    │
+                    ▼
+         CommandBus.dispatch(Command)
+                    │
+                    ▼
+         handler(command) → returns result
+                    │
+                    ▼
+         ResultPipeline.publish(CommandResult)
+```
 
 ---
 
@@ -95,225 +110,128 @@ Both share the same EventBus, memory, command, and context systems.
 
 ```text
 Aether/
-├── main.py                     # Vision pipeline entry point
-├── brain_main.py               # Brain-only entry point (PySide6)
-├── requirements.txt            # Python dependencies
+├── aether/                        # Source code
+│   ├── core/                      # Runtime foundation
+│   │   ├── application.py         # Boot → Tick → Shutdown lifecycle
+│   │   ├── command.py             # Command dataclass
+│   │   ├── command_bus.py         # Command dispatch + handler registry
+│   │   ├── command_registry.py    # Autocomplete, help, categories
+│   │   ├── command_result.py      # CommandResult dataclass
+│   │   ├── event_bus_v2.py        # Queued EventBus with flush
+│   │   ├── event_type.py          # 70+ event type constants
+│   │   ├── frame_broker.py        # Frame distribution + consumer registry
+│   │   ├── intent_resolver.py     # IIntentResolver protocol
+│   │   ├── profiler.py            # Pipeline timing + hardware budgets
+│   │   ├── adaptive_scheduler.py  # Dynamic rate control
+│   │   ├── plugin.py              # PluginBase, TickablePlugin, PluginMetadata
+│   │   ├── service_container.py   # DI container
+│   │   ├── result_pipeline.py     # CommandResult routing
+│   │   └── virtual_cursor.py      # Cursor position tracking
+│   ├── plugins/                   # Feature plugins
+│   │   ├── cli_plugin.py          # Interactive CLI (readline)
+│   │   ├── system_plugin.py       # System commands (ping, info, shutdown)
+│   │   ├── system_commands_plugin.py  # CommandRegistry + handlers
+│   │   ├── rule_intent_plugin.py  # NL → Command (14 regex patterns)
+│   │   ├── intent_resolver_plugin.py  # Event-driven intent resolution
+│   │   ├── result_formatter_plugin.py # Colored CLI output
+│   │   ├── gui_plugin.py          # PySide6 Vision HUD
+│   │   └── memory_plugin.py       # Memory CRUD commands
+│   ├── vision/                    # Vision pipeline
+│   │   └── plugins.py             # VisionAdapterPlugin (state → events)
+│   ├── phase_b/                   # Legacy bridge (CommandExecutor)
+│   ├── phase_c/                   # Input adapters
+│   │   ├── gesture_input_plugin.py    # Gesture → command mapping
+│   │   └── voice_input_plugin.py      # Voice → command mapping
+│   ├── phase_d/                   # Perception + cursor
+│   │   ├── camera_plugin.py       # CameraThread + FrameBroker
+│   │   ├── hand_plugin.py         # MediaPipe GestureRecognizer
+│   │   ├── object_plugin.py       # YOLOv8 + solvePnP
+│   │   └── cursor_plugin.py       # Cursor + PinchClick
+│   ├── ui/                        # GUI widgets
+│   │   ├── overlay_widget.py      # QPainterPath cache, QStaticText
+│   │   ├── object_list_widget.py  # Object list panel
+│   │   ├── gesture_widget.py      # Gesture status display
+│   │   ├── status_widget.py       # System status display
+│   │   ├── timeline_widget.py     # Event timeline
+│   │   └── hud_manager.py         # Multi-layer throttle scheduler
+│   ├── memory/                    # Memory service
+│   │   └── memory_service.py      # SQLite (WAL) persistence
+│   └── config/                    # Config loader
 ├── config/
-│   ├── desktop.yaml            # Desktop profile (camera, model, gesture, HUD)
-│   └── default.yaml            # Minimal defaults
-├── core/                       # Application foundation
-│   ├── engine.py               # AetherEngine — lifecycle manager
-│   ├── app.py                  # AetherApp — top-level owner (EventBus + Plugins + Settings)
-│   ├── event_bus.py            # EventBus — thread-safe pub/sub (69 event types)
-│   ├── module.py               # Module ABC + ModuleManager
-│   ├── plugin_manager.py       # Plugin ABC + PluginManager
-│   ├── settings.py             # YAML config with deep merge
-│   ├── frame_broker.py         # Thread-safe frame distribution hub
-│   ├── camera.py               # Synchronous camera wrapper
-│   ├── camera_thread.py        # Threaded camera capture
-│   ├── detector.py             # YOLOv8 inference wrapper
-│   ├── perception_pipeline.py  # Plugin orchestrator per frame
-│   ├── perception_worker.py    # Background ML pipeline (throttled)
-│   ├── cursor_manager.py       # Camera→screen coordinate mapping + smoothing
-│   ├── gesture_router.py       # Gesture→action routing with cooldown
-│   ├── action_queue.py         # Thread-safe bridge: perception → UI
-│   ├── interaction_mode.py     # Mode state machine (PASSIVE→POINTING)
-│   ├── renderer.py             # OpenCV HUD drawing
-│   ├── telemetry.py            # FPS/latency tracking
-│   ├── performance.py          # Block timing + rolling averages
-│   └── logger.py               # Logging setup
-├── perception/                 # Daemon perception threads
-│   ├── hand_plugin.py          # MediaPipe GestureRecognizer thread
-│   └── object_plugin.py        # YOLO + solvePnP thread
-├── vision/                     # Computer vision algorithms
-│   ├── hand_tracker.py         # MediaPipe HandLandmarker wrapper
-│   ├── hand_landmarks.py       # 21 landmark constants + connections
-│   ├── gesture_engine.py       # Rule-based gesture recognizer (fallback)
-│   ├── gesture_actions.py      # Gesture→Action enums + finger utilities
-│   ├── gesture_executor.py     # Gesture→EventBus bridge
-│   ├── spatial.py              # PnP distance estimator
-│   ├── pnp.py                  # Standalone solvePnP utility
-│   ├── calibration.py          # Camera intrinsics loader
-│   ├── geometry.py             # 3D visualization helpers
-│   ├── command_confirmation.py # 2-step confirm/cancel flow
-│   └── tracking.py             # Placeholder tracker (sequential IDs)
-├── interface/                  # PySide6 UI (brain-only mode)
-│   ├── ui.py                   # AetherUI — floating overlay, 3 panels
-│   ├── ui_manager.py           # UIManager — coordinates HomeMenu + StatusBar
-│   ├── home_menu.py            # HomeMenu — gesture-driven vertical chain menu
-│   ├── cursor_overlay.py       # CursorOverlay — holographic cursor widget
-│   ├── hud_renderer.py         # OpenCV HUD drawing functions
-│   └── status_bar.py           # StatusBar — top-right info overlay
-├── command/                    # Event-driven command system
-│   ├── command.py              # Command dataclass + BaseCommand ABC + Registry
-│   └── handler.py              # CommandHandler — execute + emit events
-├── memory/                     # Data models + persistence
-│   ├── models.py               # SpatialObject, Task, EventRecord dataclasses
-│   ├── storage.py              # MemoryStorage — user preferences JSON
-│   └── object_memory.py        # ObjectMemory — in-memory CRUD cache
-├── database/                   # JSON file storage layer
-│   ├── storage.py              # JsonStorage — atomic write key-value store
-│   ├── objects.py              # ObjectStore
-│   ├── tasks.py                # TaskStore
-│   └── events.py               # EventStore (append-only log)
-├── tasks/
-│   └── manager.py              # TaskManager — lifecycle CRUD
-├── context/
-│   └── context_manager.py      # Active window + CPU/RAM monitoring
-├── interaction/                # UI interaction system
-│   ├── interaction_manager.py  # Central coordinator
-│   ├── state_machine.py        # FSM: IDLE→TRACKING→MENU_OPEN/PANEL_OPEN
-│   └── focus_manager.py        # Widget hit-testing for cursor hover
-├── models/                     # ML model weights
-│   ├── gesture_recognizer.task # MediaPipe GestureRecognizer
-│   └── hand_landmarker.task    # MediaPipe HandLandmarker (legacy)
-├── tests/                      # pytest test suite
-│   ├── test_gesture_actions.py
-│   ├── test_event_bus.py
-│   ├── test_database.py
-│   ├── test_spatial.py
-│   ├── test_memory.py
-│   ├── test_tasks.py
-│   ├── test_perception_worker.py
-│   └── test_interaction.py
-└── docs/                       # Documentation
-    ├── ARCHITECTURE.md
-    ├── ROADMAP.md
-    ├── COMMANDS.md
-    ├── EVENTS.md
-    ├── MEMORY.md
-    ├── PLUGINS.md
-    ├── API.md
-    └── CONTRIBUTING.md
+│   └── vision.yaml                # Plugin load order + settings
+├── scripts/
+│   ├── setup.bat                  # One-click setup
+│   ├── start.bat                  # Launch Aether
+│   ├── tick.bat                   # Tick mode launcher
+│   └── profile.bat                # Performance profiler
+├── models/                        # ML weights (gitignored)
+├── tests/                         # 128 tests
+├── pyproject.toml
+└── main.py                        # Legacy entry point
 ```
 
 ---
 
-## Core Concepts
+## Hardware Requirements
 
-### EventBus (Central Nervous System)
-
-All modules communicate exclusively through the EventBus — no direct coupling. 69 event types across system, UI, input, command, task, vision, context, memory, and status categories. Thread-safe subscribe/emit.
-
-### Perception Pipeline (Eyes)
-
-Camera frames flow through `FrameBroker` to daemon perception threads. `HandPerceptionPlugin` runs MediaPipe GestureRecognizer for 8 native gestures. `ObjectSpatialPlugin` runs YOLOv8 for 80-class detection + solvePnP for Z-distance estimation. Both emit events on the EventBus.
-
-### Gesture Router (Translation Layer)
-
-Gestures detected by perception threads are routed through `GestureRouter` which maps them to UI actions with cooldown dedup, hold-time gating, and edge-triggered pinch detection. Actions flow through a thread-safe `ActionQueue` to ensure Qt widgets are updated on the main thread.
-
-### Cursor Manager (Spatial Mapping)
-
-Maps normalized camera coordinates to screen pixels using contain-mode aspect-ratio preservation. Applies adaptive smoothing, dead-zone filtering, and velocity prediction for low-latency cursor movement. Freezes during pinch for click accuracy.
-
-### Command System (Intelligence)
-
-Event-driven commands flow through `CommandHandler` which tracks status (PENDING→EXECUTING→COMPLETED/FAILED) and emits lifecycle events on the EventBus. Built-in commands: open_ui, close_ui, switch_panel, set_mode, get_status.
-
-### Memory & Persistence (Long-term Storage)
-
-Two-layer architecture: in-memory cache (`ObjectMemory`) backed by JSON file storage (`JsonStorage`) with atomic writes. Stores spatial objects, tasks, events, and user preferences.
-
-### Context Awareness (Environment)
-
-Detects the user's active application via win32gui, monitors CPU/memory via psutil, and auto-switches modes (developer when VS Code is focused, presentation when PowerPoint is active).
-
----
-
-## Gesture Reference
-
-| Gesture | Action | Description |
-|---------|--------|-------------|
-| `Open_Palm` | Toggle UI | Show/hide home menu |
-| `Closed_Fist` | Cancel/Close | Cancel action, close UI |
-| `Pointing_Up` | Move Cursor | Control cursor via index fingertip |
-| `Thumb_Up` | Confirm | Confirm pending action |
-| `Thumb_Down` | Reject | Reject pending action |
-| `Victory` | Developer Panel | Open developer tools |
-| `ILoveYou` | Settings Panel | Open settings |
-
-### Keyboard Hotkeys (brain_main.py)
-
-| Hotkey | Action |
-|--------|--------|
-| `Ctrl+Space` | Open/close UI |
-| `Escape` | Close UI |
-| `Ctrl+1/2/3` | Switch panels (System/Developer/Settings) |
-| `Tab` | Developer mode |
-| `M` | Normal mode |
-| `P` | Presentation mode |
+| Component | Budget | Typical |
+|-----------|--------|---------|
+| Camera | ≤40ms P95 | 33ms (30fps USB) |
+| YOLO | ≤70ms P95 | 35-45ms |
+| MediaPipe | ≤50ms P95 | 20-38ms |
+| E2E Latency | ≤120ms P95 | 65-105ms |
+| Frame Age | ≤100ms P95 | 63-98ms |
+| Tick | ≤33ms budget | 20ms avg |
 
 ---
 
 ## Configuration
 
-All settings in `config/desktop.yaml`:
+All settings in `config/vision.yaml`:
 
 ```yaml
-camera:
-  device_index: 0
-  width: 640
-  height: 480
-  fps_target: 30
+app:
+  name: "Aether"
+  version: "0.3.0"
+  tick_rate: 30
+  mode: "vision"
 
-model:
-  weights: "yolov8n.pt"
-  confidence: 0.25
+event_bus:
+  queued: true
 
-hand_tracking:
-  model_path: "models/gesture_recognizer.task"
-  num_hands: 2
+adaptive_scheduler:
+  debug: false
 
-perception:
-  fps_target: 15
-
-spatial:
-  object_width_cm: 21.0    # A4 paper width
-  object_height_cm: 29.7   # A4 paper height
-  focal_length: 640
-
-cursor:
-  smoothing: 0.15
-  dead_zone: 1
-  sensitivity: 2.0
-  prediction: 0.12
+plugins:
+  - module: "aether.plugins.system_plugin"
+    class: "SystemPlugin"
+  - module: "aether.plugins.gui_plugin"
+    class: "GUIPlugin"
+  # ... (see full config for all plugins)
 ```
 
 ---
 
-## Requirements
+## Gesture Reference
 
-- Python 3.12+
-- Windows 10/11 (primary target; context detection uses win32gui)
-- Webcam (for vision pipeline)
-- ~2GB RAM for YOLO + MediaPipe
-
-### Dependencies
-
-| Package | Purpose |
-|---------|---------|
-| `opencv-python` | Camera capture + frame processing |
-| `ultralytics` | YOLOv8 object detection |
-| `mediapipe` | Hand tracking + gesture recognition |
-| `numpy` | Array operations |
-| `PySide6` | Qt overlay UI (brain mode) |
-| `dearpygui` | GPU-accelerated dashboard (vision mode) |
-| `pynput` | Global hotkey listener |
-| `psutil` | CPU/memory monitoring |
-| `PyYAML` | Configuration files |
+| Gesture | Command | Description |
+|---------|---------|-------------|
+| `Open_Palm` | `gesture_open_palm` | Toggle UI |
+| `Closed_Fist` | `gesture_closed_fist` | Cancel/Close |
+| `Pointing_Up` | `gesture_pointing_up` | Move cursor |
+| `Thumb_Up` | `gesture_thumb_up` | Confirm |
+| `Thumb_Down` | `gesture_thumb_down` | Reject |
+| `Victory` | `gesture_victory` | Developer tools |
+| `ILoveYou` | `gesture_iloveyou` | Settings |
+| Pinch | `cursor_click` | Click at cursor |
 
 ---
 
 ## Testing
 
 ```bash
-pytest -v                                     # All tests
-pytest tests/test_gesture_actions.py -v       # Gesture system
-pytest tests/test_event_bus.py -v             # EventBus
-pytest tests/test_spatial.py -v               # Spatial/PnP
-pytest tests/test_database.py -v              # Database storage
-pytest tests/test_memory.py -v                # Memory system
+python -m pytest tests/ -v           # All 128 tests
+python -m pytest tests/test_cli_system.py -v  # CLI + intent tests
 ```
 
 ---
@@ -322,26 +240,33 @@ pytest tests/test_memory.py -v                # Memory system
 
 | File | Contents |
 |------|----------|
-| `docs/ARCHITECTURE.md` | Complete system architecture reference |
-| `docs/COMMANDS.md` | Command system framework |
-| `docs/EVENTS.md` | EventBus event type reference (69 types) |
-| `docs/MEMORY.md` | Memory & persistence architecture |
-| `docs/PLUGINS.md` | Plugin development guide |
+| `docs/ARCHITECTURE.md` | System architecture reference |
 | `docs/ROADMAP.md` | Development roadmap |
-| `docs/API.md` | Public API reference |
-| `docs/CONTRIBUTING.md` | Contribution guidelines |
+
+---
+
+## Backend v1.0.0 — Known Issues
+
+| Issue | Impact | Fix planned |
+|-------|--------|-------------|
+| Camera P95=48ms | Occasional frame drop | Hardware upgrade |
+| Tick overrun ~30% | GUI jank under load | Budget optimization |
+| YOLO ~5-8 Hz | Object detection delay | Scheduler tuning v1.0.1 |
+| CLI degraded mode | No tab-completion on Windows | `pip install pyreadline3` |
 
 ---
 
 ## Design Principles
 
-1. **Event-Driven** — No module calls another directly. All communication flows through the EventBus.
-2. **Brain-First** — Sensors are input plugins. The intelligence layer is the core.
-3. **Multi-Threaded** — Perception runs on background threads. UI stays responsive on the main thread.
-4. **Graceful Degradation** — DearPyGui falls back to OpenCV. GestureRecognizer falls back to finger-counting.
-5. **Thread-Safe** — All shared state protected by locks. FrameBroker uses Event signaling.
-6. **Extensible** — Plugin ABC, Module ABC, Command ABC — add capabilities without modifying core.
+1. **Event-Driven** — No module calls another directly. All communication through EventBus.
+2. **One-Way Data Flow** — Camera → FrameBroker → Perception → Events → UI. No cycles.
+3. **Widgets are Stateless** — Paint from OverlayModel only. No widget modifies state.
+4. **Plugins Never Communicate** — EventBus only. No direct plugin-to-plugin calls.
+5. **Thread-Safe** — FrameBroker, EventBus, CommandBus all use locks/queues.
+6. **Config-Driven** — Scheduler debug, plugin load order, hardware budgets all in YAML.
 
 ---
 
-> **Philosophy**: Sensors are just input plugins — the intelligence layer is the core.
+## License
+
+MIT
