@@ -38,12 +38,14 @@ class SchedulerConfig:
     """
     # Tick budget (main thread) - target 33ms for 30 FPS
     tick_budget_ms: float = 33.0
-    # Target frame age - if exceeded, begin pressure-based throttling
-    target_frame_age_ms: float = 45.0
-    # Max frame age before aggressive frame skip (raised from 60→85:
-    # at 30fps camera, frame_age is inherently ~65ms; 60ms skipped YOLO
-    # almost entirely. 85ms allows YOLO to run at ~5-8Hz.)
-    max_frame_age_ms: float = 85.0
+    # Target frame age - if exceeded, begin pressure-based throttling.
+    # At 30fps USB webcam, natural frame_age is ~65ms. Setting this to 55ms
+    # allows some pressure buildup only when truly overloaded.
+    target_frame_age_ms: float = 55.0
+    # Max frame age before aggressive frame skip.
+    # At 30fps, frame_age P95 can hit ~95ms during YOLO processing.
+    # 100ms allows YOLO to run when frame is only slightly stale.
+    max_frame_age_ms: float = 100.0
     # Min frame age to resume normal rate
     min_frame_age_ms: float = 30.0
     # End-to-end latency targets (120ms for hardware reference)
@@ -53,9 +55,9 @@ class SchedulerConfig:
     min_yolo_interval: float = 1.0 / 10.0   # 10 Hz max
     min_mediapipe_interval: float = 1.0 / 15.0  # 15 Hz max
     min_vision_interval: float = 1.0 / 8.0    # 8 Hz max
-    # Maximum intervals (upper bounds)
-    max_yolo_interval: float = 1.0 / 3.0    # 3 Hz min
-    max_mediapipe_interval: float = 1.0 / 5.0  # 5 Hz min
+    # Maximum intervals (upper bounds) — slowest allowed rate under pressure
+    max_yolo_interval: float = 1.0 / 4.0    # 4 Hz min (was 3 Hz)
+    max_mediapipe_interval: float = 1.0 / 8.0  # 8 Hz min (was 5 Hz)
     max_vision_interval: float = 1.0 / 3.0   # 3 Hz min
 
 
@@ -192,15 +194,18 @@ class AdaptiveScheduler:
         cfg = self._config
 
         # --- Determine pressure level ---
-        # Pressure combines tick overrun, frame age, and E2E latency
+        # Pressure combines tick overrun, frame age, and E2E latency.
+        # Weights: frame_age 45%, e2e 30%, tick_overrun 25%.
+        # tick_overrun has lower weight because YOLO/MediaPipe run in worker
+        # threads — main thread overrun doesn't directly block them.
         pressure = 0.0
 
         if tick_overrun > 0:
-            pressure += min(1.0, tick_overrun / 10.0) * 0.4  # 40% weight
+            pressure += min(1.0, tick_overrun / 15.0) * 0.25  # 25% weight, 15ms threshold
         if frame_age > cfg.target_frame_age_ms:
-            pressure += min(1.0, (frame_age - cfg.target_frame_age_ms) / cfg.max_frame_age_ms) * 0.35  # 35%
+            pressure += min(1.0, (frame_age - cfg.target_frame_age_ms) / cfg.max_frame_age_ms) * 0.45  # 45%
         if e2e_latency > cfg.target_e2e_ms:
-            pressure += min(1.0, (e2e_latency - cfg.target_e2e_ms) / cfg.max_e2e_ms) * 0.25  # 25%
+            pressure += min(1.0, (e2e_latency - cfg.target_e2e_ms) / cfg.max_e2e_ms) * 0.30  # 30%
 
         pressure = min(1.0, pressure)
 
@@ -225,13 +230,15 @@ class AdaptiveScheduler:
         vis_interval = self._smooth("vision", vis_interval)
 
         # --- Frame skip decisions ---
-        # Skip YOLO if frame is too old (stale data) or severe overrun
-        skip_yolo = frame_age > cfg.max_frame_age_ms or tick_overrun > 10.0
+        # Skip YOLO if frame is too old (stale data) or severe overrun.
+        # tick_overrun threshold: 15ms (budget is 33ms, normal usage ~20ms,
+        # allow headroom before skipping vision work)
+        skip_yolo = frame_age > cfg.max_frame_age_ms or tick_overrun > 15.0
 
-        # Skip MediaPipe if frame is very old
+        # Skip MediaPipe if frame is very old (1.5x max)
         skip_mediapipe = frame_age > cfg.max_frame_age_ms * 1.5
 
-        # Skip Vision if frame is stale
+        # Skip Vision if frame is stale (1.2x max)
         skip_vision = frame_age > cfg.max_frame_age_ms * 1.2
 
         # --- Layer intervals ---

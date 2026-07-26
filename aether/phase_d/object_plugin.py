@@ -8,6 +8,7 @@ Data flow:
     FrameBroker -> ObjectSpatialPlugin -> PerceptionResult -> VisionEventAdapter -> EventBus
 """
 
+import logging
 import threading
 import time
 import cv2
@@ -18,6 +19,8 @@ from aether.core.plugin import PluginBase
 from aether.vision import DetectedObject, PerceptionResult
 from aether.core.profiler import profiler
 from aether.core.adaptive_scheduler import adaptive_scheduler
+
+logger = logging.getLogger("Aether.ObjectSpatial")
 
 
 class ObjectSpatialPlugin(PluginBase):
@@ -90,8 +93,13 @@ class ObjectSpatialPlugin(PluginBase):
             yolo_interval = adaptive_scheduler.get_yolo_interval()
             should_skip = adaptive_scheduler.should_skip_yolo()
 
+            # Skip check first (before interval) — skip must NOT consume interval budget
+            if should_skip:
+                logger.debug("YOLO skip: should_skip=True frame_age=%.1f", adaptive_scheduler.get_state().frame_age_ms)
+                continue
+
             now = time.perf_counter()
-            if should_skip or (now - self._last_detect_time) < yolo_interval:
+            if now - self._last_detect_time < yolo_interval:
                 continue
             self._last_detect_time = now
 

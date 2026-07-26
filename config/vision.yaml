@@ -17,7 +17,7 @@ event_bus:
   queued: true
 
 adaptive_scheduler:
-  debug: false
+  debug: true
 
 plugins:
   # ── Core infrastructure ──────────────────────────────────────────

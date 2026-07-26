@@ -98,6 +98,10 @@ class CLIPlugin(TickablePlugin):
     def start(self) -> None:
         """Start the CLI reader thread."""
         self._running = True
+        # In non-interactive mode (piped stdin, profile), don't start reader
+        if not sys.stdin.isatty():
+            logger.info("CLI: non-interactive mode — reader thread not started")
+            return
         self._reader_thread = threading.Thread(
             target=self._read_loop, daemon=True, name="cli-reader"
         )
@@ -184,10 +188,8 @@ class CLIPlugin(TickablePlugin):
                 self._handle_input(line)
 
             except EOFError:
-                logger.info("CLI: EOF received, shutting down...")
+                logger.info("CLI: EOF received — reader stopped (app continues)")
                 self._running = False
-                if self._container and self._container.has("application"):
-                    self._container.resolve("application").request_shutdown()
                 break
             except KeyboardInterrupt:
                 print("\n^C — type 'quit' to exit")

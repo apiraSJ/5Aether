@@ -95,14 +95,16 @@ class HandPerceptionPlugin(PluginBase):
                 mp_interval = adaptive_scheduler.get_mediapipe_interval()
                 should_skip = adaptive_scheduler.should_skip_mediapipe()
 
+                # Skip check first (before interval) — skip must NOT consume interval budget
+                if should_skip:
+                    logger.debug("MP skip: should_skip=True frame_age=%.1f", adaptive_scheduler.get_state().frame_age_ms)
+                    continue
+
                 # Time-based throttle with adaptive interval
                 now = time.perf_counter()
                 if now - self._last_process_time < mp_interval:
                     continue
                 self._last_process_time = now
-
-                if should_skip:
-                    continue
 
                 frame = self._broker.get_frame()
                 if frame is None:
