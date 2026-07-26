@@ -24,8 +24,9 @@ plugins:
   - module: "aether.plugins.system_plugin"
     class: "SystemPlugin"
 
-  - module: "aether.plugins.keyboard_plugin"
-    class: "KeyboardInputPlugin"
+  # KeyboardInputPlugin disabled — replaced by CLIPlugin (event-driven)
+  # - module: "aether.plugins.keyboard_plugin"
+  #   class: "KeyboardInputPlugin"
 
   - module: "aether.plugins.gui_plugin"
     class: "GUIPlugin"
