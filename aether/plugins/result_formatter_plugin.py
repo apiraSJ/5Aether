@@ -38,6 +38,17 @@ class ResultFormatterPlugin(PluginBase):
         self._event_bus = None
         self._use_color = True
         self._cli_plugin = None
+        # Commands too noisy to print on every completion
+        self._silent_commands: set[str] = {
+            "system.ping", "system.tick",
+            "vision.scan",
+            "gesture.open_palm", "gesture.closed_fist",
+            "gesture.pointing_up", "gesture.thumb_up",
+            "gesture.thumb_down", "gesture.victory",
+            "gesture.love", "gesture.peace",
+            "cursor.move",
+            "input.gesture",
+        }
 
     @property
     def metadata(self) -> PluginMetadata:
@@ -63,8 +74,10 @@ class ResultFormatterPlugin(PluginBase):
     # ── Event handlers ────────────────────────────────────────────────
 
     def _on_command_completed(self, event: Event) -> None:
-        """Format successful command result."""
+        """Format successful command result. Skip silent/high-frequency commands."""
         cmd_name = event.payload.get("command", "")
+        if cmd_name in self._silent_commands:
+            return
         result = event.payload.get("result")
         duration = event.payload.get("duration_ms", 0)
 
