@@ -79,7 +79,7 @@ plugins:
   - module: "aether.phase_d.object_plugin"
     class: "ObjectSpatialPlugin"
     config:
-      model_path: "yolov8n.pt"
+      model_path: "models/yolov8n.pt"
       confidence: 0.25
       imgsz: 320
 

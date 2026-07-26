@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
 *.egg-info/
 dist/
 build/
@@ -14,12 +15,24 @@ build/
 .vscode/
 .idea/
 
-# Profiling artifacts
+# Pytest
+.pytest_cache/
+
+# Models (large files — track with Git LFS or download separately)
+*.pt
+*.onnx
+*.tflite
+*.pb
+
+# Logs
+logs/
+*.log
+
+# Runtime output
 profile_results.txt
 profile_data.txt
 demo_output.txt
 vision_log.txt
-logs/
 
 # OS
 Thumbs.db
