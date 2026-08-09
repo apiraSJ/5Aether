@@ -83,9 +83,57 @@ class EventType(str, Enum):
     WORKSPACE_WINDOW_MOVED = "workspace.window.moved"
     WORKSPACE_WINDOW_RESIZED = "workspace.window.resized"
     WORKSPACE_LAYOUT_CHANGED = "workspace.layout.changed"
+    WORKSPACE_FOCUS_CHANGED = "workspace.focus.changed"
+    SYSTEM_METRICS = "system.metrics"
     WORKSPACE_THEME_CHANGED = "workspace.theme.changed"
+    WORKSPACE_LOADED = "workspace.loaded"
+    WORKSPACE_CHANGED = "workspace.changed"
+    LAYOUT_SAVED = "layout.saved"
+    LAYOUT_LOADED = "layout.loaded"
+
+    # ── Panel ──────────────────────────────────────────────────────────────
+    PANEL_SHOWN = "panel.shown"
+    PANEL_HIDDEN = "panel.hidden"
+    PANEL_MOVED = "panel.moved"
+    PANEL_FOCUSED = "panel.focused"
+    PANEL_REGISTERED = "panel.registered"
+
+    # ── Interaction ─────────────────────────────────────────────────────────
+    # Cursor state and movement
+    CURSOR_MOVED = "interaction.cursor.moved"
+    CURSOR_ENTERED_PANEL = "interaction.cursor.entered_panel"
+    CURSOR_LEFT_PANEL = "interaction.cursor.left_panel"
+
+    # Panel interaction states
+    PANEL_HOVERED = "interaction.panel.hovered"
+    PANEL_SELECTED = "interaction.panel.selected"
+
+    # Drag operations
+    PANEL_DRAG_STARTED = "interaction.panel.drag_started"
+    PANEL_DRAGGING = "interaction.panel.dragging"
+    PANEL_DRAG_ENDED = "interaction.panel.drag_ended"
+
+    # Resize operations
+    PANEL_RESIZE_STARTED = "interaction.panel.resize_started"
+    PANEL_RESIZED = "interaction.panel.resized"
+
+    # Generic interaction events (target-agnostic)
+    SELECTION_CHANGED = "interaction.selection.changed"
+    DRAG_STARTED = "interaction.drag.started"
+    DRAG_UPDATED = "interaction.drag.updated"
+    DRAG_ENDED = "interaction.drag.ended"
+    RESIZE_STARTED = "interaction.resize.started"
+    RESIZE_UPDATED = "interaction.resize.updated"
+    RESIZE_ENDED = "interaction.resize.ended"
+
+    # Overall interaction state changes
+    INTERACTION_STATE_CHANGED = "interaction.state.changed"
+
+    # ── Theme ───────────────────────────────────────────────────────────────
+    THEME_CHANGED = "theme.changed"
 
     # ── Notification ───────────────────────────────────────────────────────
+    NOTIFICATION_CREATED = "notification.created"
     NOTIFICATION_SHOW = "notification.show"
     NOTIFICATION_DISMISS = "notification.dismiss"
     NOTIFICATION_CLICKED = "notification.clicked"
@@ -99,6 +147,17 @@ class EventType(str, Enum):
     MEMORY_STORED = "memory.stored"
     MEMORY_RECALLED = "memory.recalled"
     MEMORY_DELETED = "memory.deleted"
+
+    # Memory panel / service events (Sprint 2.1A)
+    MEMORY_READY = "memory.ready"
+    MEMORY_SEARCH_REQUESTED = "memory.search.requested"
+    MEMORY_SEARCH_COMPLETED = "memory.search.completed"
+    MEMORY_RECALL_REQUESTED = "memory.recall.requested"
+    MEMORY_RECALL_COMPLETED = "memory.recall.completed"
+    MEMORY_CREATED = "memory.created"
+    MEMORY_UPDATED = "memory.updated"
+    MEMORY_PINNED = "memory.pinned"
+    MEMORY_UNPINNED = "memory.unpinned"
 
     # ── Task ───────────────────────────────────────────────────────────────
     TASK_CREATED = "task.created"
@@ -127,9 +186,13 @@ class EventType(str, Enum):
     DESKTOP_WINDOW_CHANGED = "desktop.window.changed"
 
     # ── AI ─────────────────────────────────────────────────────────────────
+    AI_STATE_CHANGED = "ai.state.changed"
     AI_THINKING_STARTED = "ai.thinking.started"
     AI_THINKING_COMPLETED = "ai.thinking.completed"
     AI_RESPONSE_READY = "ai.response.ready"
+    AI_ERROR = "ai.error"
+    AI_TOOL_STARTED = "ai.tool.started"
+    AI_TOOL_COMPLETED = "ai.tool.completed"
 
     # ── Workflow ───────────────────────────────────────────────────────────
     WORKFLOW_STARTED = "workflow.started"

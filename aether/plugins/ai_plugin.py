@@ -1,0 +1,199 @@
+"""AIPlugin — lifecycle and integration for the AI chat service.
+
+Architecture:
+    AIPlugin.initialize()
+        → Loads config/ai.yaml (merged over the base config via ConfigLoader)
+        → Creates AIService (EchoProvider in Phase 1.5)
+        → Creates ToolRegistry (explicit whitelist) + ToolExecutor (CommandBus
+          boundary) and wires them into AIService
+        → Registers ai.chat in CommandRegistry
+        → Registers ai.chat handler on CommandBus
+        → Registers AIService in DI container
+
+    AIPlugin handles `ai.chat` commands dispatched by the AI Chat panel
+    widget, CLI, or voice — it is the single owner of the assistant command
+    (previously an echo bot living inside GUIPlugin).
+"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import Optional
+
+from aether.ai.context import ContextBuilder
+from aether.ai.models import AIState
+from aether.ai.provider import AIProvider, ProviderError
+from aether.ai.providers import create_provider
+from aether.ai.service import AIService
+from aether.ai.tools import ToolExecutor, ToolRegistry
+from aether.config.loader import ConfigLoader
+from aether.core.command import Command
+from aether.core.command_registry import CommandInfo, CommandRegistry
+from aether.core.plugin import PluginBase, PluginMetadata
+from aether.core.service_container import ServiceContainer
+
+logger = logging.getLogger("Aether.AIPlugin")
+
+_AI_CONFIG_PATH = "config/ai.yaml"
+
+_AI_DEFAULTS: dict = {
+    "ai": {
+        "enabled": True,
+        "provider": "echo",
+        "system_prompt": "You are Aether, the spatial AI operating system. Answer concisely.",
+    },
+}
+
+_AI_COMMANDS = [
+    CommandInfo(
+        name="ai.chat",
+        description="Send a message to the Aether assistant",
+        category="ai",
+        params_help="message=<text> [session_id=<id>]",
+        examples=("ai.chat message=What do you see?",),
+    ),
+]
+
+
+class AIPlugin(PluginBase):
+    """Manages the AI chat service lifecycle and the ai.chat command."""
+
+    name = "ai_plugin"
+
+    def __init__(self) -> None:
+        self._container: Optional[ServiceContainer] = None
+        self._event_bus = None
+        self._command_bus = None
+        self._service: Optional[AIService] = None
+        self._ai_config: Optional[ConfigLoader] = None
+        self._ai_config_path: str = _AI_CONFIG_PATH
+
+    @property
+    def ai_service(self) -> Optional[AIService]:
+        """The functional AIService (UI facade)."""
+        return self._service
+
+    @property
+    def metadata(self) -> PluginMetadata:
+        return PluginMetadata(
+            label="AI",
+            version="2.0",
+            category="ai",
+            commands=[c.name for c in _AI_COMMANDS],
+            description="AI chat assistant + agent tool loop (provider pluggable)",
+        )
+
+    def initialize(self, container: ServiceContainer) -> None:
+        self._container = container
+        self._event_bus = container.resolve("event_bus")
+        self._command_bus = container.resolve("command_bus")
+
+        self._ai_config = self._load_ai_config(container)
+        if not self._ai_config.get("ai.enabled", True):
+            logger.info("AIPlugin disabled via config (ai.enabled=false)")
+            return
+
+        system_prompt = self._ai_config.get("ai.system_prompt", "") or _AI_DEFAULTS["ai"]["system_prompt"]
+        provider = self._create_provider(self._ai_config.get("ai.provider", "echo"))
+        max_tool_rounds = int(self._ai_config.get("ai.max_tool_rounds", 5) or 5)
+        context_builder = ContextBuilder(system_prompt=system_prompt)
+
+        memory_service = None
+        if container.has("memory_service"):
+            memory_service = container.resolve("memory_service")
+
+        registry = ToolRegistry()
+        executor = ToolExecutor(self._command_bus.dispatch_sync, registry=registry)
+
+        self._service = AIService(
+            provider=provider,
+            event_bus=self._event_bus,
+            memory_service=memory_service,
+            context_builder=context_builder,
+            tool_registry=registry,
+            tool_executor=executor,
+            max_tool_rounds=max_tool_rounds,
+        )
+        container.register_instance("ai_service", self._service)
+
+        self._register_commands()
+        logger.info("AIPlugin initialized (provider=%s, tools=%d)",
+                    provider.name, registry.count)
+
+    def start(self) -> None:
+        logger.info("AIPlugin started (provider=%s available=%s)",
+                    self._service.provider_name if self._service else "?",
+                    self._service.provider_available if self._service else False)
+
+    def is_ready(self) -> bool:
+        return self._service is not None
+
+    def stop(self) -> None:
+        logger.info("AIPlugin stopped")
+
+    # ── Config ─────────────────────────────────────────────────────
+
+    def _load_ai_config(self, container: ServiceContainer) -> ConfigLoader:
+        """Load config/ai.yaml, reusing ConfigLoader merge semantics.
+
+        The container's base config is passed as `defaults` only when the
+        ai.yaml file exists, so a missing file cannot cause the base config
+        to be written out as ai.yaml. A custom path (tests) is honored.
+        """
+        base_data: dict = {}
+        if container.has("config"):
+            base = container.resolve("config")
+            if hasattr(base, "data"):
+                base_data = base.data
+
+        if Path(self._ai_config_path).exists():
+            loader = ConfigLoader(self._ai_config_path, defaults=base_data)
+        else:
+            loader = ConfigLoader(self._ai_config_path, defaults=_AI_DEFAULTS)
+        loader.load()
+        return loader
+
+    def _create_provider(self, name: str) -> AIProvider:
+        """Resolve the configured provider via the provider factory.
+
+        An unknown or misconfigured provider raises ProviderError; it is
+        logged loudly and falls back to echo so boot never hard-fails on an
+        experimental config value.
+        """
+        try:
+            return create_provider(name, self._ai_config.data if self._ai_config else {})
+        except ProviderError as exc:
+            logger.warning("AI provider '%s' unavailable (%s); using echo", name, exc)
+            return create_provider("echo", {})
+
+    # ── Command registration ───────────────────────────────────────
+
+    def _register_commands(self) -> None:
+        registry = None
+        if self._container and self._container.has("command_registry"):
+            registry = self._container.resolve("command_registry")
+        else:
+            registry = CommandRegistry()
+            if self._container:
+                registry.initialize(self._container)
+
+        for cmd_info in _AI_COMMANDS:
+            registry.register(cmd_info)
+
+        if self._command_bus:
+            self._command_bus.register_handler("ai.chat", self._handle_ai_chat)
+
+    def _handle_ai_chat(self, command: Command) -> dict:
+        """Route an ai.chat command through the AIService."""
+        message = command.params.get("message", "").strip()
+        if not message:
+            return {"message": "Empty message"}
+        if not self._service:
+            return {"message": "AI service not initialized"}
+
+        session_id = command.params.get("session_id", "default")
+        result = self._service.chat(message, session_id=session_id)
+        if result.state == AIState.ERROR:
+            return {"message": "AI error", "error": "provider_failed"}
+        return {"message": result.text}

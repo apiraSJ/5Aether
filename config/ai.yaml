@@ -1,0 +1,21 @@
+# AI configuration — loaded by AIPlugin (merged over the base config).
+# Provider details live here; default.yaml/vision.yaml only enable the
+# capability. No secrets in YAML — use api_key_env to point at an env var.
+
+ai:
+  enabled: true
+  provider: echo
+
+  system_prompt: "You are Aether, the spatial AI operating system. Answer concisely."
+  max_tool_rounds: 5
+
+  echo:
+    # Phase 1.5: deterministic offline backend. No configuration needed.
+
+  openai:
+    model: gpt-4o-mini
+    api_key_env: OPENAI_API_KEY
+
+  local:
+    model_path: models/llama-3.2-3b-instruct-q4_k_m.gguf
+    n_ctx: 4096
