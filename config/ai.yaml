@@ -9,6 +9,13 @@ ai:
   system_prompt: "You are Aether, the spatial AI operating system. Answer concisely."
   max_tool_rounds: 5
 
+  context:
+    # ContextEngine settings (Phase 3.1).
+    # include_vision only enables reading an already-running OverlayModel;
+    # it never starts the camera or any CV stack.
+    max_memory: 5
+    include_vision: false
+
   echo:
     # Phase 1.5: deterministic offline backend. No configuration needed.
 

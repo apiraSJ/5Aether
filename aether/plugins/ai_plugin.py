@@ -21,7 +21,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from aether.ai.context import ContextBuilder
+from aether.ai.context import ContextEngine
 from aether.ai.models import AIState
 from aether.ai.provider import AIProvider, ProviderError
 from aether.ai.providers import create_provider
@@ -42,6 +42,10 @@ _AI_DEFAULTS: dict = {
         "enabled": True,
         "provider": "echo",
         "system_prompt": "You are Aether, the spatial AI operating system. Answer concisely.",
+        "context": {
+            "max_memory": 5,
+            "include_vision": False,
+        },
     },
 }
 
@@ -97,11 +101,33 @@ class AIPlugin(PluginBase):
         system_prompt = self._ai_config.get("ai.system_prompt", "") or _AI_DEFAULTS["ai"]["system_prompt"]
         provider = self._create_provider(self._ai_config.get("ai.provider", "echo"))
         max_tool_rounds = int(self._ai_config.get("ai.max_tool_rounds", 5) or 5)
-        context_builder = ContextBuilder(system_prompt=system_prompt)
+
+        context_cfg = self._ai_config.get("ai.context", {}) or {}
+        max_memory = int(context_cfg.get("max_memory", 5) or 5)
+        include_vision = bool(context_cfg.get("include_vision", False))
 
         memory_service = None
         if container.has("memory_service"):
             memory_service = container.resolve("memory_service")
+        workspace_manager = None
+        if container.has("workspace_manager"):
+            workspace_manager = container.resolve("workspace_manager")
+        panel_registry = None
+        if container.has("panel_registry"):
+            panel_registry = container.resolve("panel_registry")
+        overlay_model = None
+        if container.has("overlay_model"):
+            overlay_model = container.resolve("overlay_model")
+
+        context_engine = ContextEngine(
+            system_prompt=system_prompt,
+            workspace_manager=workspace_manager,
+            panel_registry=panel_registry,
+            memory_service=memory_service,
+            overlay_model=overlay_model,
+            include_vision=include_vision,
+            max_memory=max_memory,
+        )
 
         registry = ToolRegistry()
         executor = ToolExecutor(self._command_bus.dispatch_sync, registry=registry)
@@ -110,10 +136,11 @@ class AIPlugin(PluginBase):
             provider=provider,
             event_bus=self._event_bus,
             memory_service=memory_service,
-            context_builder=context_builder,
+            context_engine=context_engine,
             tool_registry=registry,
             tool_executor=executor,
             max_tool_rounds=max_tool_rounds,
+            max_memory=max_memory,
         )
         container.register_instance("ai_service", self._service)
 

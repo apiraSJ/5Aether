@@ -18,7 +18,7 @@ import threading
 import time
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-from aether.ai.context import ContextBuilder
+from aether.ai.context import ContextBuilder, ContextEngine
 from aether.ai.models import AIResult, AIState, ChatMessage, ChatRole
 from aether.ai.provider import AIProvider, EchoProvider, ProviderError
 from aether.ai.stream import StreamEvent
@@ -43,10 +43,12 @@ class AIService:
         event_bus: Optional[EventBus] = None,
         memory_service: Any = None,
         context_builder: Optional[ContextBuilder] = None,
+        context_engine: Optional[ContextEngine] = None,
         max_history: int = DEFAULT_MAX_HISTORY,
         tool_registry: Optional[ToolRegistry] = None,
         tool_executor: Optional[ToolExecutor] = None,
         max_tool_rounds: int = DEFAULT_MAX_TOOL_ROUNDS,
+        max_memory: int = 5,
     ) -> None:
         self._provider = provider or EchoProvider()
         self._event_bus = event_bus
@@ -56,6 +58,16 @@ class AIService:
         self._tool_registry = tool_registry
         self._tool_executor = tool_executor
         self._max_tool_rounds = max_tool_rounds
+        self._max_memory = max_memory
+        self._tool_uses: List[str] = []
+
+        if context_engine is None:
+            context_engine = ContextEngine(
+                system_prompt=self._context_builder.system_prompt,
+                memory_service=memory_service,
+                max_memory=max_memory,
+            )
+        self._context_engine = context_engine
 
         self._state = AIState.IDLE
         self._state_lock = threading.RLock()
@@ -95,9 +107,11 @@ class AIService:
         """Execute a whitelisted tool through the injected ToolExecutor.
 
         Returns a structured ToolResult; never raises for command failures.
+        Tool names are recorded for the per-turn TaskContext.
         """
         if self._tool_executor is None:
             return ToolResult(success=False, error="tool execution not configured", tool=name)
+        self._tool_uses.append(name)
         return self._tool_executor.execute(name, args)
 
     # ── Chat API ────────────────────────────────────────────────────
@@ -137,12 +151,17 @@ class AIService:
             "session_id": session_id, "message": message,
         })
 
+        self._tool_uses = []
         history = self._sessions.setdefault(session_id, [])
         history.append(ChatMessage(role=ChatRole.USER, content=message))
         del history[:-self._max_history]
 
-        context = self._context_builder.build(
-            history, memory_service=self._memory_service, query=message,
+        context = self._context_engine.build(
+            history,
+            query=message,
+            limit=self._max_memory,
+            tool_round=0,
+            recent_tools=[],
         )
         messages = [
             ChatMessage(role=ChatRole.SYSTEM, content=context.system_prompt),
@@ -167,6 +186,10 @@ class AIService:
                 provider=self._provider.name,
             )
 
+        if context.task is not None:
+            # Reflect the actual tool activity on the returned context.
+            context.task.tool_round = tool_rounds
+            context.task.recent_tools = list(self._tool_uses)
         history.append(ChatMessage(role=ChatRole.ASSISTANT, content=text))
         duration_ms = (time.perf_counter() - start) * 1000.0
 

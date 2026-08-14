@@ -10,7 +10,16 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:  # pragma: no cover - runtime-safe string annotations
+    from aether.ai.context import (
+        MemoryContext,
+        SystemContext,
+        TaskContext,
+        VisionContext,
+        WorkspaceContext,
+    )
 
 
 class ChatRole(str, Enum):
@@ -73,12 +82,22 @@ class AIState(str, Enum):
 
 @dataclass
 class AIContext:
-    """Assembled conversation context handed to the provider."""
+    """Assembled conversation context handed to the provider.
+
+    ``system`` / ``workspace`` / ``memory`` / ``task`` / ``vision`` are the
+    Phase 3.1 domain contexts (see aether.ai.context). They default to None
+    so Phase 1/2 callers constructing AIContext directly keep working.
+    """
 
     system_prompt: str = ""
     messages: List[ChatMessage] = field(default_factory=list)
     memory_snippets: List[Dict[str, Any]] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    system: Optional["SystemContext"] = None
+    workspace: Optional["WorkspaceContext"] = None
+    memory: Optional["MemoryContext"] = None
+    task: Optional["TaskContext"] = None
+    vision: Optional["VisionContext"] = None
 
 
 @dataclass
