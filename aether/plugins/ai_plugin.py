@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Optional
 
 from aether.ai.context import ContextEngine
+from aether.ai.intent import IntentReasoner, RuleBasedIntentClassifier
 from aether.ai.memory import DefaultMemoryRetriever
 from aether.ai.models import AIState
 from aether.ai.provider import AIProvider, ProviderError
@@ -47,6 +48,11 @@ _AI_DEFAULTS: dict = {
             "max_memory": 5,
             "include_vision": False,
             "max_memory_chars": 1500,
+        },
+        "intent": {
+            "enabled": True,
+            "classifier": "rule_based",
+            "max_clarification_turns": 2,
         },
     },
 }
@@ -109,6 +115,10 @@ class AIPlugin(PluginBase):
         include_vision = bool(context_cfg.get("include_vision", False))
         max_memory_chars = int(context_cfg.get("max_memory_chars", 1500) or 1500)
 
+        intent_cfg = self._ai_config.get("ai.intent", {}) or {}
+        intent_enabled = bool(intent_cfg.get("enabled", True))
+        max_clarification_turns = int(intent_cfg.get("max_clarification_turns", 2) or 2)
+
         memory_service = None
         if container.has("memory_service"):
             memory_service = container.resolve("memory_service")
@@ -127,6 +137,17 @@ class AIPlugin(PluginBase):
             if memory_service is not None
             else None
         )
+
+        # Phase 3.3: IntentReasoner — a routing layer, not a second agent.
+        # Enabled only when intent_enabled AND a rule-based classifier.
+        intent_reasoner = None
+        if intent_enabled:
+            classifier = RuleBasedIntentClassifier()
+            intent_reasoner = IntentReasoner(
+                classifier=classifier,
+                memory_retriever=memory_retriever,
+                max_clarification_turns=max_clarification_turns,
+            )
 
         context_engine = ContextEngine(
             system_prompt=system_prompt,
@@ -154,12 +175,14 @@ class AIPlugin(PluginBase):
             max_memory=max_memory,
             max_memory_chars=max_memory_chars,
             memory_retriever=memory_retriever,
+            intent_reasoner=intent_reasoner,
         )
         container.register_instance("ai_service", self._service)
 
         self._register_commands()
-        logger.info("AIPlugin initialized (provider=%s, tools=%d)",
-                    provider.name, registry.count)
+        logger.info("AIPlugin initialized (provider=%s, tools=%d, intent=%s)",
+                    provider.name, registry.count,
+                    intent_reasoner is not None)
 
     def start(self) -> None:
         logger.info("AIPlugin started (provider=%s available=%s)",

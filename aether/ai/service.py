@@ -14,11 +14,18 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 import time
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-from aether.ai.context import ContextBuilder, ContextEngine
+from aether.ai.context import ContextBuilder, ContextEngine, MemoryContext
+from aether.ai.intent import (
+    ACT_MEMORY_SEARCH,
+    ACT_MEMORY_WRITE,
+    ACT_ASK_CLARIFICATION,
+    IntentReasoner,
+)
 from aether.ai.models import AIResult, AIState, ChatMessage, ChatRole
 from aether.ai.provider import AIProvider, EchoProvider, ProviderError
 from aether.ai.stream import StreamEvent
@@ -32,6 +39,12 @@ EVENT_SOURCE = "ai.service"
 
 DEFAULT_MAX_HISTORY = 20
 DEFAULT_MAX_TOOL_ROUNDS = 5
+
+# Low-information words skipped when echoing a memory-topic FTS fallback query.
+_FTS_STOPWORDS = frozenset({
+    "the", "a", "an", "and", "or", "about", "of", "for", "on", "in", "with",
+    "what", "did", "say", "do", "is", "was", "were", "i", "you",
+})
 
 
 class AIService:
@@ -51,6 +64,7 @@ class AIService:
         max_memory: int = 5,
         max_memory_chars: int = 1500,
         memory_retriever: Optional[Any] = None,
+        intent_reasoner: Optional[IntentReasoner] = None,
     ) -> None:
         self._provider = provider or EchoProvider()
         self._event_bus = event_bus
@@ -63,6 +77,7 @@ class AIService:
         self._max_memory = max_memory
         self._max_memory_chars = max_memory_chars
         self._memory_retriever = memory_retriever
+        self._intent_reasoner = intent_reasoner
         self._tool_uses: List[str] = []
 
         if context_engine is None:
@@ -108,6 +123,10 @@ class AIService:
     @property
     def tool_registry(self) -> Optional[ToolRegistry]:
         return self._tool_registry
+
+    @property
+    def intent_reasoner(self) -> Optional[IntentReasoner]:
+        return self._intent_reasoner
 
     def execute_tool(self, name: str, args: Optional[Dict[str, Any]] = None) -> ToolResult:
         """Execute a whitelisted tool through the injected ToolExecutor.
@@ -169,6 +188,15 @@ class AIService:
             tool_round=0,
             recent_tools=[],
         )
+
+        # ── Phase 3.3: Intent routing (when enabled). ──
+        # The reasoner decides a route. It never executes tools; ACTION,
+        # QUESTION and UNKNOWN fall through to the existing agent loop below
+        # exactly as pre-3.3. Any failure degrades to the agent loop.
+        short_circuit = self._try_intent_short_circuit(message, context, session_id)
+        if short_circuit is not None:
+            return short_circuit
+
         messages = [
             ChatMessage(role=ChatRole.SYSTEM, content=context.system_prompt),
             *context.messages,
@@ -215,6 +243,147 @@ class AIService:
             state=AIState.IDLE,
             context=context,
             tool_rounds=tool_rounds,
+        )
+
+    def _try_intent_short_circuit(
+        self, message: str, context: Any, session_id: str
+    ) -> Optional[AIResult]:
+        """Route a message via the intent layer when enabled.
+
+        Returns an AIResult to short-circuit the agent loop, or None to let
+        the normal agent loop run.  Phase 3.3 safety:
+          - The reasoner never executes tools; it only routes.
+          - Only explicit MEMORY_WRITE stores memory (remember/... as ...).
+          - ACTION / QUESTION / UNKNOWN fall through (return None).
+          - Any failure → None → agent loop (Phase 3.2 behavior).
+        """
+        reasoner = self._intent_reasoner
+        if reasoner is None:
+            return None
+        try:
+            decision = reasoner.reason(
+                user_message=message,
+                context=context,
+                available_tools=self._tool_registry.all() if self._tool_registry else [],
+                recent_history=context.messages if context else None,
+            )
+        except Exception:  # pragma: no cover - defensive
+            logger.warning("Intent routing failed; running agent loop")
+            return None
+
+        self._emit(EventType.INTENT_RESOLVED, {
+            "session_id": session_id,
+            "intent": decision.intent.value,
+            "confidence": decision.confidence,
+            "reason": decision.reason,
+            "suggested_action": decision.suggested_action,
+        })
+
+        if decision.suggested_action == ACT_MEMORY_WRITE:
+            return self._handle_memory_write(decision, message, session_id, context)
+        if decision.suggested_action == ACT_MEMORY_SEARCH:
+            prefetched = self._prefetch_memory(context, decision.extracted_params)
+            context.memory = prefetched.memory if prefetched is not None else context.memory
+            return None  # fall through to agent loop with enriched memory
+        if decision.suggested_action == ACT_ASK_CLARIFICATION:
+            return self._handle_clarification(decision, message, session_id, context)
+        return None  # ACTION / QUESTION / UNKNOWN → agent loop
+
+    def _handle_memory_write(
+        self, decision: Any, message: str, session_id: str, context: Any
+    ) -> AIResult:
+        """Store an explicit memory write from a MEMORY_WRITE decision."""
+        reasoner = self._intent_reasoner
+        history = self._sessions.setdefault(session_id, [])
+        start = time.perf_counter()
+
+        record_id = reasoner.remember(decision.extracted_params) if reasoner else None
+        if record_id:
+            text = f"บันทึกเรียบร้อย: {decision.extracted_params.get('memory_key')}"
+        else:
+            text = "ไม่สามารถบันทึกหน่วยความจำได้"
+
+        history.append(ChatMessage(role=ChatRole.ASSISTANT, content=text))
+        duration_ms = (time.perf_counter() - start) * 1000.0
+
+        self._emit(EventType.AI_THINKING_COMPLETED, {
+            "session_id": session_id, "duration_ms": duration_ms,
+        })
+        self._emit(EventType.AI_RESPONSE_READY, {
+            "session_id": session_id, "message": message, "response": text,
+        })
+        self._set_state(AIState.IDLE)
+
+        return AIResult(
+            text=text,
+            session_id=session_id,
+            provider=self._provider.name,
+            duration_ms=duration_ms,
+            state=AIState.IDLE,
+            context=context,
+            tool_rounds=0,
+        )
+
+    def _prefetch_memory(self, context: Any, params: Dict[str, Any]) -> Any:
+        """Enrich context with extra memory before the agent loop runs."""
+        retriever = self._memory_retriever
+        if retriever is None or context is None or context.memory is None:
+            return context
+        query = (params or {}).get("memory_query") or (params or {}).get("query_topic", "")
+        if not query:
+            return context
+        try:
+            ranked = retriever.retrieve(query, limit=3, token_budget=500)
+            # FTS5 is finicky with multi-word phrases ("the budget" → 0). If
+            # the full topic returned nothing, retry with significant tokens.
+            if not ranked:
+                keys = [t for t in re.split(r"[\s,;.!?]+", query)
+                        if t.strip() and t.lower() not in _FTS_STOPWORDS]
+                for key in keys:
+                    ranked = retriever.retrieve(key, limit=3, token_budget=500)
+                    if ranked:
+                        break
+        except Exception:  # pragma: no cover - defensive
+            logger.warning("Memory pre-fetch failed")
+            return context
+
+        merged: Dict[str, Any] = {}
+        for rec in context.memory.relevant:
+            merged[str(rec.get("id", ""))] = rec
+        for r in ranked:
+            view = r.memory
+            merged[str(view.get("id", ""))] = view
+
+        context.memory = MemoryContext(
+            relevant=list(merged.values()),
+            stats=context.memory.stats,
+            budget=context.memory.budget,
+            skipped_due_to_budget=context.memory.skipped_due_to_budget,
+        )
+        return context
+
+    def _handle_clarification(
+        self, decision: Any, message: str, session_id: str, context: Any
+    ) -> AIResult:
+        """Return a follow-up prompt for a CLARIFICATION decision."""
+        reasoner = self._intent_reasoner
+        text = reasoner.clarify_text(decision) if reasoner else \
+            "ขอให้ผมช่วยอะไรเพิ่มเติมไหมครับ?"
+        history = self._sessions.setdefault(session_id, [])
+        history.append(ChatMessage(role=ChatRole.ASSISTANT, content=text))
+
+        self._emit(EventType.AI_RESPONSE_READY, {
+            "session_id": session_id, "message": message, "response": text,
+        })
+        self._set_state(AIState.IDLE)
+
+        return AIResult(
+            text=text,
+            session_id=session_id,
+            provider=self._provider.name,
+            state=AIState.IDLE,
+            context=context,
+            tool_rounds=0,
         )
 
     def _run_agent_loop(

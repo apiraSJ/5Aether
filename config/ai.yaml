@@ -18,6 +18,15 @@ ai:
     include_vision: false
     max_memory_chars: 1500
 
+  intent:
+    # Phase 3.3 Intent/Reasoning routing layer.
+    # enabled: false restores exact pre-3.3 chat behavior (always agent loop).
+    # classifier is rule_based (deterministic, no LLM call, <2ms).
+    # max_clarification_turns guards how many follow-up questions are asked.
+    enabled: true
+    classifier: rule_based
+    max_clarification_turns: 2
+
   echo:
     # Phase 1.5: deterministic offline backend. No configuration needed.
 
