@@ -27,6 +27,12 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from aether import __version__
+from aether.ai.memory import (
+    MemoryBudget,
+    MemoryRetriever,
+    RankedMemory,
+    trim_to_budget,
+)
 from aether.ai.models import AIContext, ChatMessage
 
 logger = logging.getLogger("Aether.AI.Context")
@@ -64,10 +70,16 @@ class WorkspaceContext:
 
 @dataclass
 class MemoryContext:
-    """Memory records relevant to the current turn + storage stats."""
+    """Memory records relevant to the current turn + storage stats.
 
-    relevant: List[Dict[str, Any]]  # search(query) + recent()
+    ``budget`` and ``skipped_due_to_budget`` describe the prompt-budget cut
+    applied by the retriever (None/0 for legacy sources that don't budget).
+    """
+
+    relevant: List[Dict[str, Any]]  # search(query) + recent(), budget-trimmed
     stats: Dict[str, int]           # objects, fact_keys, total_facts
+    budget: Optional[MemoryBudget] = None
+    skipped_due_to_budget: int = 0
 
 
 @dataclass
@@ -111,6 +123,8 @@ class ContextEngine:
         overlay_model: Any = None,
         include_vision: bool = False,
         max_memory: int = 5,
+        max_memory_chars: int = 1500,
+        memory_retriever: Optional[MemoryRetriever] = None,
     ) -> None:
         self._system_prompt = system_prompt
         self._workspace_manager = workspace_manager
@@ -119,6 +133,8 @@ class ContextEngine:
         self._overlay_model = overlay_model
         self._include_vision = include_vision
         self._max_memory = max_memory
+        self._max_memory_chars = max_memory_chars
+        self._memory_retriever = memory_retriever
 
     @property
     def system_prompt(self) -> str:
@@ -127,6 +143,10 @@ class ContextEngine:
     @property
     def max_memory(self) -> int:
         return self._max_memory
+
+    @property
+    def max_memory_chars(self) -> int:
+        return self._max_memory_chars
 
     def build(
         self,
@@ -212,7 +232,35 @@ class ContextEngine:
         )
 
     def _build_memory(self, query: str, limit: int) -> MemoryContext:
+        stats = self._memory_stats()
+        if self._memory_retriever is not None:
+            return self._build_memory_from_retriever(query, limit, stats)
+        # Legacy path (no retriever): keep Phase 3.1 behavior.
         relevant = _gather_memory_records(self._memory_service, query, limit)
+        return MemoryContext(relevant=relevant, stats=stats)
+
+    def _build_memory_from_retriever(
+        self, query: str, limit: int, stats: Dict[str, int]
+    ) -> MemoryContext:
+        ranked: List[RankedMemory] = []
+        try:
+            ranked = self._memory_retriever.retrieve(
+                query,
+                limit=limit,
+                token_budget=self._max_memory_chars,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Memory retrieval failed: %s", exc)
+        budget = MemoryBudget(max_items=limit, max_chars=self._max_memory_chars)
+        relevant, skipped = trim_to_budget(ranked, budget)
+        return MemoryContext(
+            relevant=relevant,
+            stats=stats,
+            budget=budget,
+            skipped_due_to_budget=skipped,
+        )
+
+    def _memory_stats(self) -> Dict[str, int]:
         stats: Dict[str, int] = {}
         if self._memory_service is not None:
             stats_fn = _safe_attr(self._memory_service, "get_stats") or _safe_attr(
@@ -223,7 +271,7 @@ class ContextEngine:
                     stats = dict(stats_fn())
                 except Exception as exc:  # pragma: no cover - defensive
                     logger.warning("Memory stats failed: %s", exc)
-        return MemoryContext(relevant=relevant, stats=stats)
+        return stats
 
     def _build_task(
         self,

@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Optional
 
 from aether.ai.context import ContextEngine
+from aether.ai.memory import DefaultMemoryRetriever
 from aether.ai.models import AIState
 from aether.ai.provider import AIProvider, ProviderError
 from aether.ai.providers import create_provider
@@ -45,6 +46,7 @@ _AI_DEFAULTS: dict = {
         "context": {
             "max_memory": 5,
             "include_vision": False,
+            "max_memory_chars": 1500,
         },
     },
 }
@@ -105,6 +107,7 @@ class AIPlugin(PluginBase):
         context_cfg = self._ai_config.get("ai.context", {}) or {}
         max_memory = int(context_cfg.get("max_memory", 5) or 5)
         include_vision = bool(context_cfg.get("include_vision", False))
+        max_memory_chars = int(context_cfg.get("max_memory_chars", 1500) or 1500)
 
         memory_service = None
         if container.has("memory_service"):
@@ -119,6 +122,12 @@ class AIPlugin(PluginBase):
         if container.has("overlay_model"):
             overlay_model = container.resolve("overlay_model")
 
+        memory_retriever = (
+            DefaultMemoryRetriever(memory_service)
+            if memory_service is not None
+            else None
+        )
+
         context_engine = ContextEngine(
             system_prompt=system_prompt,
             workspace_manager=workspace_manager,
@@ -127,6 +136,8 @@ class AIPlugin(PluginBase):
             overlay_model=overlay_model,
             include_vision=include_vision,
             max_memory=max_memory,
+            max_memory_chars=max_memory_chars,
+            memory_retriever=memory_retriever,
         )
 
         registry = ToolRegistry()
@@ -141,6 +152,8 @@ class AIPlugin(PluginBase):
             tool_executor=executor,
             max_tool_rounds=max_tool_rounds,
             max_memory=max_memory,
+            max_memory_chars=max_memory_chars,
+            memory_retriever=memory_retriever,
         )
         container.register_instance("ai_service", self._service)
 

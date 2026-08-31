@@ -49,6 +49,8 @@ class AIService:
         tool_executor: Optional[ToolExecutor] = None,
         max_tool_rounds: int = DEFAULT_MAX_TOOL_ROUNDS,
         max_memory: int = 5,
+        max_memory_chars: int = 1500,
+        memory_retriever: Optional[Any] = None,
     ) -> None:
         self._provider = provider or EchoProvider()
         self._event_bus = event_bus
@@ -59,6 +61,8 @@ class AIService:
         self._tool_executor = tool_executor
         self._max_tool_rounds = max_tool_rounds
         self._max_memory = max_memory
+        self._max_memory_chars = max_memory_chars
+        self._memory_retriever = memory_retriever
         self._tool_uses: List[str] = []
 
         if context_engine is None:
@@ -66,6 +70,8 @@ class AIService:
                 system_prompt=self._context_builder.system_prompt,
                 memory_service=memory_service,
                 max_memory=max_memory,
+                max_memory_chars=max_memory_chars,
+                memory_retriever=memory_retriever,
             )
         self._context_engine = context_engine
 
