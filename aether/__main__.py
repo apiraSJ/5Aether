@@ -78,6 +78,11 @@ examples:
         default=0,
         help="profiling duration in seconds (0 = run until Ctrl+C)"
     )
+    parser.add_argument(
+        "--background",
+        action="store_true",
+        help="start with UI hidden (override gui.start_visible config)"
+    )
     return parser.parse_args(argv)
 
 
@@ -134,13 +139,13 @@ def _run_tick(app) -> int:
     return app.run()
 
 
-def _run_vision(config_path: str, strict_plugins: bool, profile: bool = False, duration: int = 0) -> int:
+def _run_vision(config_path: str, strict_plugins: bool, profile: bool = False, duration: int = 0, background: bool = False) -> int:
     """Run vision pipeline: camera + hand tracking + object detection + cursor control."""
     from aether.core.application import AetherApplication
     from aether.core.profiler import profiler
     
     logger.info("Starting vision mode with config: %s", config_path)
-    app = AetherApplication(config_path=config_path, strict_plugins=strict_plugins)
+    app = AetherApplication(config_path=config_path, strict_plugins=strict_plugins, background=background)
     
     # Run boot proof first to verify plugins loaded
     try:
@@ -220,13 +225,13 @@ def main(argv: Optional[list] = None) -> int:
 
     if args.mode == "tick":
         from aether.core.application import AetherApplication
-        app = AetherApplication(config_path=config_path, strict_plugins=args.strict_plugins)
+        app = AetherApplication(config_path=config_path, strict_plugins=args.strict_plugins, background=args.background)
         return _run_tick(app)
     elif args.mode == "vision":
-        return _run_vision(config_path, args.strict_plugins, args.profile, args.duration)
+        return _run_vision(config_path, args.strict_plugins, args.profile, args.duration, background=args.background)
     else:
         from aether.app import AetherApp, AetherAppBootError
-        app = AetherApp(config_path=config_path, strict_plugins=args.strict_plugins)
+        app = AetherApp(config_path=config_path, strict_plugins=args.strict_plugins, background=args.background)
         try:
             app.boot()
         except AetherAppBootError as exc:

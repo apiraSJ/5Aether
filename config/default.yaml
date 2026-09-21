@@ -27,3 +27,7 @@ plugins:
   - module: "aether.plugins.gui_plugin"
     class: "GUIPlugin"
     enabled: true
+gui:
+  start_visible: true
+  system_tray: false
+  hotkey_toggle: "ctrl+alt+space"

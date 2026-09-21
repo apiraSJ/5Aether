@@ -144,6 +144,22 @@ class ConfigLoader:
             self.load()
         return schema.validate(self._data)
 
+    def set(self, key_path: str, value: Any) -> None:
+        """Set a value using dotted-path notation, e.g. config.set('gui.start_visible', False).
+
+        Creates intermediate dicts as needed. Auto-loads if not yet loaded.
+        """
+        if not self._loaded:
+            self.load()
+
+        parts = key_path.split(".")
+        node: Any = self._data
+        for part in parts[:-1]:
+            if not isinstance(node, dict) or part not in node:
+                node[part] = {}
+            node = node[part]
+        node[parts[-1]] = value
+
     def _write_defaults(self) -> None:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)

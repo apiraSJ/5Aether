@@ -39,9 +39,10 @@ class AetherAppBootError(Exception):
 class AetherApp:
     """Owns the lifecycle of the Aether runtime: boot, run, shutdown."""
 
-    def __init__(self, config_path: str = "config/default.yaml", strict_plugins: bool = False) -> None:
+    def __init__(self, config_path: str = "config/default.yaml", strict_plugins: bool = False, background: bool = False) -> None:
         self.config_path = config_path
         self.strict_plugins = strict_plugins
+        self._background = background
 
         self.config: Optional[ConfigLoader] = None
         self.container: Optional[ServiceContainer] = None
@@ -64,6 +65,10 @@ class AetherApp:
             self.config.load()
         except ConfigError as exc:
             raise AetherAppBootError(f"Configuration failed to load: {exc}") from exc
+
+        # UI-0: --background flag forces hidden, overrides gui.start_visible.
+        if self._background:
+            self.config.set("gui.start_visible", False)
 
         self._configure_logging()
         logger.info("=" * 60)

@@ -43,9 +43,11 @@ class AetherApplication:
         self,
         config_path: str = "config/default.yaml",
         strict_plugins: bool = False,
+        background: bool = False,
     ) -> None:
         self.config_path = config_path
         self.strict_plugins = strict_plugins
+        self._background = background
 
         # Core infrastructure (set during boot)
         self.config: Optional[ConfigLoader] = None
@@ -94,6 +96,9 @@ class AetherApplication:
         except ConfigError as exc:
             raise ApplicationBootError(f"Configuration failed to load: {exc}") from exc
 
+        # UI-0: --background flag forces hidden, overrides gui.start_visible.
+        if self._background:
+            self.config.set("gui.start_visible", False)
         self._configure_logging()
         self._log_boot_banner()
 
