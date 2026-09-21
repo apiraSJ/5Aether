@@ -579,6 +579,35 @@ class UIShell:
         from aether.ui.camera_mode import CameraMode
         self.set_camera_mode(CameraMode.HIDDEN)
 
+    # ── UI-1: Runtime show / hide / toggle ───────────────────────────
+
+    def show(self) -> None:
+        """Show the shell window at runtime."""
+        if self._window:
+            self._window.show()
+
+    def hide(self) -> None:
+        """Hide the shell window without shutdown."""
+        if self._window:
+            self._window.hide()
+
+    def toggle(self) -> None:
+        """Toggle shell window visibility."""
+        if self._window:
+            if self._window.isVisible():
+                self.hide()
+            else:
+                self.show()
+
+    @property
+    def is_visible(self) -> bool:
+        """Query current window visibility."""
+        if self._window:
+            return self._window.isVisible()
+        return False
+
+    # ── Workspace ───────────────────────────────────────────────────
+
     def _restore_workspace(self) -> None:
         """Restore the last session layout, then announce the active layout."""
         workspace_manager = self._context.workspace_manager

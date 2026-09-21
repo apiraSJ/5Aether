@@ -368,3 +368,189 @@ class TestFullBoot:
             assert app.command_bus is not None
         finally:
             app.shutdown()
+
+
+# ── UI-1: Runtime Show / Hide API ───────────────────────────────────
+
+
+class TestUIShellShowHideAPI:
+    """UI-1: UIShell runtime visibility methods."""
+
+    def test_show_makes_window_visible(self, qapp):
+        from aether.ui.ui_context import UIContext
+        from aether.ui.ui_shell import UIShell
+        shell = UIShell(UIContext())
+        shell.build(app=qapp, vision_mode=False, show_window=False)
+        assert not shell.window.isVisible()
+        shell.show()
+        assert shell.window.isVisible()
+        shell.shutdown()
+
+    def test_hide_makes_window_hidden(self, qapp):
+        from aether.ui.ui_context import UIContext
+        from aether.ui.ui_shell import UIShell
+        shell = UIShell(UIContext())
+        shell.build(app=qapp, vision_mode=False, show_window=True)
+        assert shell.window.isVisible()
+        shell.hide()
+        assert not shell.window.isVisible()
+        shell.shutdown()
+
+    def test_toggle_switches_visibility(self, qapp):
+        from aether.ui.ui_context import UIContext
+        from aether.ui.ui_shell import UIShell
+        shell = UIShell(UIContext())
+        shell.build(app=qapp, vision_mode=False, show_window=False)
+        assert not shell.window.isVisible()
+        shell.toggle()
+        assert shell.window.isVisible()
+        shell.toggle()
+        assert not shell.window.isVisible()
+        shell.shutdown()
+
+    def test_is_visible_reports_correct_state(self, qapp):
+        from aether.ui.ui_context import UIContext
+        from aether.ui.ui_shell import UIShell
+        shell = UIShell(UIContext())
+        shell.build(app=qapp, vision_mode=False, show_window=False)
+        assert shell.is_visible is False
+        shell.show()
+        assert shell.is_visible is True
+        shell.hide()
+        assert shell.is_visible is False
+        shell.shutdown()
+
+
+class TestGUIPluginShowHideAPI:
+    """UI-1: GUIPlugin show/hide/toggle/is_ui_visible methods."""
+
+    def test_show_ui_shows_window(self, qapp, tmp_path):
+        from aether.plugins.gui_plugin import GUIPlugin
+        container, context, bus = _make_container(tmp_path, start_visible=False)
+        plugin = GUIPlugin()
+        plugin.initialize(container)
+        plugin.start()
+        try:
+            assert not plugin._shell.window.isVisible()
+            result = plugin.show_ui()
+            assert result["message"] == "UI shown"
+            assert plugin._shell.window.isVisible()
+        finally:
+            plugin.stop()
+            _flush(bus)
+
+    def test_hide_ui_hides_window(self, qapp, tmp_path):
+        from aether.plugins.gui_plugin import GUIPlugin
+        container, context, bus = _make_container(tmp_path, start_visible=True)
+        plugin = GUIPlugin()
+        plugin.initialize(container)
+        plugin.start()
+        try:
+            assert plugin._shell.window.isVisible()
+            result = plugin.hide_ui()
+            assert result["message"] == "UI hidden"
+            assert not plugin._shell.window.isVisible()
+        finally:
+            plugin.stop()
+            _flush(bus)
+
+    def test_toggle_ui_toggles_window(self, qapp, tmp_path):
+        from aether.plugins.gui_plugin import GUIPlugin
+        container, context, bus = _make_container(tmp_path, start_visible=False)
+        plugin = GUIPlugin()
+        plugin.initialize(container)
+        plugin.start()
+        try:
+            assert not plugin._shell.window.isVisible()
+            result = plugin.toggle_ui()
+            assert "visible" in result["message"]
+            assert plugin._shell.window.isVisible()
+            result = plugin.toggle_ui()
+            assert "hidden" in result["message"]
+            assert not plugin._shell.window.isVisible()
+        finally:
+            plugin.stop()
+            _flush(bus)
+
+    def test_is_ui_visible_reports_state(self, qapp, tmp_path):
+        from aether.plugins.gui_plugin import GUIPlugin
+        container, context, bus = _make_container(tmp_path, start_visible=False)
+        plugin = GUIPlugin()
+        plugin.initialize(container)
+        plugin.start()
+        try:
+            result = plugin.is_ui_visible()
+            assert result["message"] == "hidden"
+            plugin.show_ui()
+            result = plugin.is_ui_visible()
+            assert result["message"] == "visible"
+        finally:
+            plugin.stop()
+            _flush(bus)
+
+
+class TestShellCommands:
+    """UI-1: ui.shell.* command routing through CommandBus."""
+
+    def _make_plugin(self, tmp_path, start_visible=False):
+        from aether.plugins.gui_plugin import GUIPlugin
+        container, context, bus = _make_container(tmp_path, start_visible=start_visible)
+        plugin = GUIPlugin()
+        plugin.initialize(container)
+        plugin.start()
+        return plugin, container, bus
+
+    def test_shell_show_command(self, qapp, tmp_path):
+        from aether.core.command import Command
+        plugin, container, bus = self._make_plugin(tmp_path, start_visible=False)
+        try:
+            cmd_bus = container.resolve("command_bus")
+            result = cmd_bus.dispatch_sync(Command(
+                name="ui.shell.show", source="test",
+            ))
+            assert result["message"] == "UI shown"
+            assert plugin._shell.window.isVisible()
+        finally:
+            plugin.stop()
+            _flush(bus)
+
+    def test_shell_hide_command(self, qapp, tmp_path):
+        from aether.core.command import Command
+        plugin, container, bus = self._make_plugin(tmp_path, start_visible=True)
+        try:
+            cmd_bus = container.resolve("command_bus")
+            result = cmd_bus.dispatch_sync(Command(
+                name="ui.shell.hide", source="test",
+            ))
+            assert result["message"] == "UI hidden"
+            assert not plugin._shell.window.isVisible()
+        finally:
+            plugin.stop()
+            _flush(bus)
+
+    def test_shell_toggle_command(self, qapp, tmp_path):
+        from aether.core.command import Command
+        plugin, container, bus = self._make_plugin(tmp_path, start_visible=False)
+        try:
+            cmd_bus = container.resolve("command_bus")
+            result = cmd_bus.dispatch_sync(Command(
+                name="ui.shell.toggle", source="test",
+            ))
+            assert "visible" in result["message"]
+            assert plugin._shell.window.isVisible()
+        finally:
+            plugin.stop()
+            _flush(bus)
+
+    def test_shell_is_visible_command(self, qapp, tmp_path):
+        from aether.core.command import Command
+        plugin, container, bus = self._make_plugin(tmp_path, start_visible=False)
+        try:
+            cmd_bus = container.resolve("command_bus")
+            result = cmd_bus.dispatch_sync(Command(
+                name="ui.shell.is_visible", source="test",
+            ))
+            assert result["message"] == "hidden"
+        finally:
+            plugin.stop()
+            _flush(bus)

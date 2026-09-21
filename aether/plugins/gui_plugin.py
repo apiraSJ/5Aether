@@ -1,11 +1,13 @@
-"""GUIPlugin — lightweight HUD orchestrator.
+"""GUIPlugin — thin UI orchestrator.
 
-Creates OverlayModel, OverlayController, HUDManager, and assembles vision HUD widgets.
-In headless mode, falls back to a simple dashboard.
+The plugin's job is DI: build a UIContext from the container, create a
+UIShell, and drive its lifecycle (start / tick / stop). All widget
+creation, layout, rendering, and teardown live in UIShell; all shared
+UI dependencies are bundled in UIContext.
 
 Architecture:
+    GUIPlugin ──builds──> UIContext ──> UIShell ──owns──> widgets
     EventBus → OverlayController → OverlayModel → Widgets → HUDManager → Screen
-    GUIPlugin only creates widgets, registers them with HUDManager, and drives the render loop.
 """
 
 from __future__ import annotations
@@ -13,19 +15,16 @@ from __future__ import annotations
 import logging
 import sys
 import time
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 from aether.core.plugin import TickablePlugin, PluginMetadata
 from aether.core.service_container import ServiceContainer
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger("Aether.GUIPlugin")
 
 
 class GUIPlugin(TickablePlugin):
-    """HUD orchestrator. Creates widgets, registers with HUDManager, drives render loop."""
+    """DI composition root. Builds UIContext + UIShell, drives lifecycle."""
 
     name = "gui_plugin"
 
@@ -34,12 +33,13 @@ class GUIPlugin(TickablePlugin):
         self._event_bus = None
         self._command_bus = None
         self._app = None
-        self._window = None
         self._overlay_model = None
         self._overlay_controller = None
         self._hud_manager = None
-        self._timeline = None
-        self._perf_hud = None
+        self._panel_registry = None
+        self._workspace_manager = None
+        self._context = None
+        self._shell = None
         self._running = False
         self._boot_time = time.time()
         self._is_vision_mode = False
@@ -47,31 +47,34 @@ class GUIPlugin(TickablePlugin):
     @property
     def metadata(self) -> PluginMetadata:
         return PluginMetadata(
-            label="GUI", version="2.0", category="ui",
+            label="GUI", version="3.0", category="ui",
             description="Vision HUD overlay with EventBus-driven state"
         )
-
-    def eventFilter(self, obj, event) -> bool:
-        from PySide6.QtCore import QEvent
-        from PySide6.QtGui import QKeyEvent
-        if event.type() == QEvent.KeyPress:
-            key = event.key()
-            if key == 0x01000030 and self._timeline:  # Qt.Key_F1
-                vis = not self._timeline.isVisible()
-                self._timeline.setVisible(vis)
-                if self._hud_manager:
-                    layer = 3 if vis else 3
-                    self._hud_manager.add_widget(self._timeline, layer=layer)
-                return True
-            if key == 0x01000031 and self._perf_hud:  # Qt.Key_F2
-                self._perf_hud.setVisible(not self._perf_hud.isVisible())
-                return True
-        return False
 
     def initialize(self, container: ServiceContainer) -> None:
         self._container = container
         self._command_bus = container.resolve("command_bus")
         self._event_bus = container.resolve("event_bus")
+
+        # Register palette-driven UI commands
+        self._command_bus.register_handler("ui.panel.focus", self._handle_panel_focus)
+        self._command_bus.register_handler("ui.panel.toggle", self._handle_panel_toggle)
+        self._command_bus.register_handler("ui.layout.load", self._handle_layout_load)
+
+        # Camera commands
+        self._command_bus.register_handler("ui.camera.toggle", self._handle_camera_toggle)
+        self._command_bus.register_handler("ui.camera.show", self._handle_camera_show)
+        self._command_bus.register_handler("ui.camera.hide", self._handle_camera_hide)
+        self._command_bus.register_handler("ui.camera.mode.background", lambda c: self._handle_camera_mode(c, "background"))
+        self._command_bus.register_handler("ui.camera.mode.pip", lambda c: self._handle_camera_mode(c, "pip"))
+        self._command_bus.register_handler("ui.camera.mode.minimal", lambda c: self._handle_camera_mode(c, "minimal"))
+        self._command_bus.register_handler("ui.camera.mode.hidden", lambda c: self._handle_camera_mode(c, "hidden"))
+
+        # UI-1: Shell show / hide commands
+        self._command_bus.register_handler("ui.shell.show", lambda c: self.show_ui())
+        self._command_bus.register_handler("ui.shell.hide", lambda c: self.hide_ui())
+        self._command_bus.register_handler("ui.shell.toggle", lambda c: self.toggle_ui())
+        self._command_bus.register_handler("ui.shell.is_visible", lambda c: self.is_ui_visible())
 
         # Detect vision mode from config
         config = container.resolve("config") if container.has("config") else None
@@ -82,6 +85,9 @@ class GUIPlugin(TickablePlugin):
         from aether.ui.overlay_model import OverlayModel
         self._overlay_model = OverlayModel()
 
+        # Register overlay model in DI container for other plugins
+        container.register_instance("overlay_model", self._overlay_model)
+
         # Create overlay controller (subscribes to EventBus)
         from aether.ui.overlay_controller import OverlayController
         self._overlay_controller = OverlayController(self._event_bus, self._overlay_model)
@@ -90,7 +96,83 @@ class GUIPlugin(TickablePlugin):
         from aether.ui.hud_manager import HUDManager
         self._hud_manager = HUDManager()
 
-        logger.info("GUIPlugin initialized (vision=%s)", self._is_vision_mode)
+        # Create PanelRegistry and register workspace panels
+        from aether.ui.panel.panel_registry import PanelRegistry
+        from aether.ui.panel.panel_info import PanelInfo
+        from aether.panels.memory_panel import MemoryPanel
+
+        self._panel_registry = PanelRegistry(event_bus=self._event_bus)
+
+        # Camera panel (existing, uses FrameBroker)
+        self._panel_registry.register(PanelInfo(
+            id="camera_panel", type="camera",
+            label="Camera Feed",
+            x=0, y=0, w=1920, h=540,
+            z_index=0, visible=True,
+        ))
+
+        # Memory panel (view-only, dispatches commands + subscribes to events)
+        self._memory_panel = MemoryPanel(x=0, y=560, width=950, height=520)
+        self._memory_panel.wire_services(self._command_bus, self._event_bus)
+        self._panel_registry.register(PanelInfo(
+            id="memory", type="memory",
+            label="Memory",
+            x=0, y=560, w=950, h=520,
+            z_index=10, visible=True,
+            widget=self._memory_panel,
+        ))
+
+        # AI Chat panel (real widget, created by factory)
+        self._panel_registry.register(PanelInfo(
+            id="ai_chat", type="ai_chat",
+            label="AI Chat",
+            x=970, y=560, w=950, h=520,
+            z_index=10, visible=True,
+        ))
+
+        # Tasks panel (real widget, created by factory)
+        self._panel_registry.register(PanelInfo(
+            id="tasks", type="tasks",
+            label="Tasks",
+            x=0, y=1100, w=950, h=460,
+            z_index=10, visible=True,
+        ))
+
+        # Dashboard panel (real widget, created by factory)
+        self._panel_registry.register(PanelInfo(
+            id="dashboard", type="dashboard",
+            label="Dashboard",
+            x=970, y=1100, w=950, h=460,
+            z_index=10, visible=True,
+        ))
+
+        # Register PanelRegistry in DI container
+        container.register_instance("panel_registry", self._panel_registry)
+
+        # NotificationManager — DI service, EventBus aggregator
+        from aether.ui.panel.notification_manager import NotificationManager
+        self._notification_manager = NotificationManager(self._event_bus)
+        container.register_instance("notification_manager", self._notification_manager)
+
+        # WorkspaceManager — layout persistence (needed by palette + shell)
+        from aether.workspace.workspace_manager import WorkspaceManager
+        self._workspace_manager = WorkspaceManager(self._panel_registry)
+        container.register_instance("workspace_manager", self._workspace_manager)
+
+        # Register camera commands in CommandRegistry (for palette discovery)
+        self._register_camera_commands(container)
+
+        # Build the single UIContext bundle handed to the UIShell + widgets
+        from aether.ui.ui_context import UIContext
+        self._context = UIContext.from_container(
+            container,
+            overlay_model=self._overlay_model,
+            overlay_controller=self._overlay_controller,
+            hud_manager=self._hud_manager,
+        )
+
+        logger.info("GUIPlugin initialized (vision=%s) — %d panels registered",
+                    self._is_vision_mode, self._panel_registry.panel_count())
 
     def start(self) -> None:
         try:
@@ -98,214 +180,149 @@ class GUIPlugin(TickablePlugin):
             self._app = QApplication.instance() or QApplication(sys.argv)
             self._app.setQuitOnLastWindowClosed(False)
 
-            if self._is_vision_mode:
-                self._create_vision_hud()
-            else:
-                self._create_headless_dashboard()
+            # UI-0: background-capable runtime — window stays hidden unless
+            # config explicitly asks for it. Core/AI/EventBus/Memory/Vision
+            # are unaffected by UI visibility.
+            show_window = False
+            if self._context is not None and self._context.config is not None:
+                show_window = bool(self._context.config.get("gui.start_visible", False))
+
+            from aether.ui.ui_shell import UIShell
+            self._shell = UIShell(self._context)
+            self._shell.build(app=self._app, vision_mode=self._is_vision_mode, show_window=show_window)
 
             self._running = True
-            logger.info("GUIPlugin UI started")
+            logger.info("GUIPlugin UI started (visible=%s)", show_window)
         except ImportError:
             logger.warning("PySide6 not available, running headless")
             self._running = True
         except Exception as e:
             logger.exception("GUIPlugin start failed: %s", e)
 
-    # ── Vision Mode HUD ─────────────────────────────────────────────
-
-    def _create_vision_hud(self) -> None:
-        from PySide6.QtCore import Qt, QObject, QEvent
-        from PySide6.QtWidgets import QWidget, QStackedLayout
-
-        class _EventFilter(QObject):
-            def __init__(self, plugin):
-                super().__init__()
-                self._plugin = plugin
-            def eventFilter(self, obj, event):
-                return self._plugin.eventFilter(obj, event)
-
-        window = QWidget()
-        window.setWindowTitle("Aether Vision HUD")
-        window.setWindowFlags(
-            Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint | Qt.Tool
-        )
-        window.setAttribute(Qt.WA_TranslucentBackground)
-        window.resize(640, 480)
-
-        layout = QStackedLayout(window)
-        layout.setStackingMode(QStackedLayout.StackAll)
-
-        # Camera feed (background — layer 0)
-        broker = None
-        if self._container and self._container.has("frame_broker"):
-            broker = self._container.resolve("frame_broker")
-
-        if broker:
-            from aether.ui.camera_widget import CameraWidget
-            cam = CameraWidget(broker)
-            layout.addWidget(cam)
-            self._hud_manager.add_widget(cam, layer=0)
-
-        # Overlay (transparent, paints on top — layer 1)
-        from aether.ui.overlay_widget import OverlayWidget
-        overlay = OverlayWidget(self._overlay_model)
-        layout.addWidget(overlay)
-        self._hud_manager.add_widget(overlay, layer=1)
-
-        # Status bar (top — layer 2)
-        from aether.ui.status_widget import StatusWidget
-        status = StatusWidget(self._overlay_model, window)
-        status.setGeometry(0, 0, 640, 28)
-        self._hud_manager.add_widget(status, layer=2)
-
-        # Object list (left side — layer 2)
-        from aether.ui.object_list_widget import ObjectListWidget
-        obj_list = ObjectListWidget(self._overlay_model, window)
-        obj_list.setGeometry(0, 28, 160, 400)
-        self._hud_manager.add_widget(obj_list, layer=2)
-
-        # Gesture bar (bottom — layer 2)
-        from aether.ui.gesture_widget import GestureWidget
-        gesture = GestureWidget(self._overlay_model, window)
-        gesture.setGeometry(0, 448, 640, 32)
-        self._hud_manager.add_widget(gesture, layer=2)
-
-        # Timeline (hidden, toggle with key — layer 3)
-        from aether.ui.timeline_widget import TimelineWidget
-        timeline = TimelineWidget(self._overlay_model, window)
-        timeline.setGeometry(480, 28, 160, 400)
-        timeline.hide()
-        self._hud_manager.add_widget(timeline, layer=3)
-        self._timeline = timeline
-
-        # Performance HUD (developer mode, hidden by default — layer 3)
-        from aether.ui.performance_hud import PerformanceHUD
-        perf_hud = PerformanceHUD(window)
-        perf_hud.setGeometry(0, 460, 220, 120)
-        self._hud_manager.add_widget(perf_hud, layer=3)
-        self._perf_hud = perf_hud
-
-        # Position top-right of screen
-        screen = self._app.primaryScreen().geometry()
-        window.move(screen.width() - 660, 20)
-
-        self._window = window
-        self._event_filter = _EventFilter(self)
-        window.installEventFilter(self._event_filter)
-        window.show()
-
-        logger.info("Vision HUD created (%d widgets, %d layers)",
-                     self._hud_manager.widget_count, len(self._hud_manager.layers))
-
-    # ── Headless Dashboard ──────────────────────────────────────────
-
-    def _create_headless_dashboard(self) -> None:
-        from PySide6.QtCore import Qt
-        from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QListWidget
-        from PySide6.QtGui import QFont
-
-        window = QWidget()
-        window.setWindowTitle("Aether Dashboard")
-        window.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint | Qt.Tool)
-        window.setAttribute(Qt.WA_TranslucentBackground)
-        window.resize(400, 500)
-
-        frame_layout = QVBoxLayout(window)
-        frame_layout.setContentsMargins(12, 12, 12, 12)
-
-        hdr = QLabel("AETHER")
-        hdr.setFont(QFont("Consolas", 11, QFont.Bold))
-        hdr.setStyleSheet("color:#00ffff;")
-        frame_layout.addWidget(hdr)
-
-        self._objects_list = QListWidget()
-        self._objects_list.setStyleSheet(
-            "QListWidget{background:rgba(0,0,0,0.3);border:1px solid rgba(0,255,255,0.2);"
-            "border-radius:6px;color:#e0e0e0;font-family:Consolas;font-size:10px;}"
-        )
-        frame_layout.addWidget(self._objects_list, 1)
-
-        self._toast_label = QLabel("")
-        self._toast_label.setAlignment(Qt.AlignCenter)
-        self._toast_label.setStyleSheet(
-            "QLabel{background:rgba(0,200,100,0.9);color:white;border-radius:6px;padding:6px;"
-            "font-family:Consolas;font-size:10px;}"
-        )
-        self._toast_label.hide()
-        frame_layout.addWidget(self._toast_label)
-
-        self._window = window
-        window.show()
-
-    # ── Command Input ───────────────────────────────────────────────
-
-    def _send_command(self, text: str) -> None:
-        from aether.core.command import Command
-        parts = text.split()
-        if not parts:
-            return
-        cmd, args = parts[0].lower(), parts[1:]
-
-        if cmd == "remember" and len(args) >= 2:
-            data = {}
-            for a in args[1:]:
-                if "=" in a:
-                    k, v = a.split("=", 1)
-                    try:
-                        data[k] = float(v) if "." in v else int(v)
-                    except ValueError:
-                        data[k] = v
-            self._command_bus.dispatch(Command(
-                name="memory.remember", source="gui",
-                params={"object_id": args[0], "data": data}
-            ))
-        elif cmd == "recall" and args:
-            self._command_bus.dispatch(Command(
-                name="memory.recall", source="gui", params={"object_id": args[0]}
-            ))
-        elif cmd == "forget" and args:
-            self._command_bus.dispatch(Command(
-                name="memory.forget", source="gui", params={"object_id": args[0]}
-            ))
-
-    # ── Toast ───────────────────────────────────────────────────────
-
-    def _show_toast(self, msg: str, level: str = "ok") -> None:
-        if not hasattr(self, '_toast_label') or not self._toast_label:
-            return
-        colors = {
-            "ok": "rgba(0,200,100,0.9)", "error": "rgba(220,50,50,0.9)",
-            "warning": "rgba(220,180,0,0.9)", "info": "rgba(0,150,255,0.9)"
-        }
-        self._toast_label.setStyleSheet(
-            f"QLabel{{background:{colors.get(level, colors['ok'])};color:white;"
-            f"border-radius:6px;padding:6px;font-family:Consolas;font-size:10px;}}"
-        )
-        self._toast_label.setText(msg)
-        self._toast_label.show()
-
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(3000, self._toast_label.hide)
-
     # ── Lifecycle ───────────────────────────────────────────────────
 
     def update(self, dt: float) -> None:
-        if self._app and self._running:
-            # Drive HUD render pipeline — throttled by HUDManager per layer
-            if self._hud_manager:
-                self._hud_manager.update()
-                self._hud_manager.paint()
-            self._app.processEvents()
+        if self._app and self._running and self._shell is not None:
+            self._shell.update()
 
     def stop(self) -> None:
         self._running = False
-        if self._overlay_controller:
-            self._overlay_controller.unsubscribe()
-        if self._hud_manager:
-            self._hud_manager.clear()
-        if self._window:
-            self._window.hide()
+        if self._shell is not None:
+            self._shell.shutdown()
 
     def shutdown(self) -> None:
         self.stop()
         logger.info("GUIPlugin shutdown")
+
+    # ── Command Handlers ─────────────────────────────────────────────
+
+    def _handle_panel_focus(self, command) -> dict:
+        """Focus a panel (palette / command entry)."""
+        panel_id = command.params.get("panel_id", "")
+        if not panel_id:
+            return {"message": "Usage: ui.panel.focus panel_id=<id>"}
+        if self._panel_registry and self._panel_registry.focus_panel(panel_id):
+            return {"message": f"Focused panel '{panel_id}'"}
+        return {"message": f"Panel '{panel_id}' not found"}
+
+    def _handle_panel_toggle(self, command) -> dict:
+        """Toggle a panel's visibility (palette / command entry)."""
+        panel_id = command.params.get("panel_id", "")
+        if not panel_id:
+            return {"message": "Usage: ui.panel.toggle panel_id=<id>"}
+        if self._panel_registry and self._panel_registry.toggle_panel(panel_id):
+            state = "visible" if self._panel_registry.get(panel_id).visible else "hidden"
+            return {"message": f"Panel '{panel_id}' {state}"}
+        return {"message": f"Panel '{panel_id}' not found"}
+
+    def _handle_layout_load(self, command) -> dict:
+        """Load a saved layout (palette / command entry)."""
+        name = command.params.get("name", "")
+        if not name:
+            return {"message": "Usage: ui.layout.load name=<layout>"}
+        if self._workspace_manager and self._workspace_manager.load_layout(name):
+            return {"message": f"Loaded layout '{name}'"}
+        return {"message": f"Layout '{name}' not found"}
+
+    # ── Camera Commands ───────────────────────────────────────────
+
+    def _handle_camera_toggle(self, command) -> dict:
+        if self._shell is None:
+            return {"message": "Shell not ready"}
+        self._shell.toggle_camera()
+        mode = self._shell.camera_state.mode.value if self._shell.camera_state else "unknown"
+        return {"message": f"Camera → {mode}"}
+
+    def _handle_camera_show(self, command) -> dict:
+        if self._shell is None:
+            return {"message": "Shell not ready"}
+        self._shell.show_camera()
+        return {"message": "Camera shown"}
+
+    def _handle_camera_hide(self, command) -> dict:
+        if self._shell is None:
+            return {"message": "Shell not ready"}
+        self._shell.hide_camera()
+        return {"message": "Camera hidden"}
+
+    def _handle_camera_mode(self, command, mode_str: str) -> dict:
+        if self._shell is None:
+            return {"message": "Shell not ready"}
+        self._shell.set_camera_mode(mode_str)
+        return {"message": f"Camera mode → {mode_str}"}
+
+    # ── UI-1: Shell show / hide commands ────────────────────────────
+
+    def show_ui(self) -> dict:
+        """Show the shell window at runtime."""
+        if self._shell is None:
+            return {"message": "Shell not ready"}
+        self._shell.show()
+        return {"message": "UI shown"}
+
+    def hide_ui(self) -> dict:
+        """Hide the shell window without shutdown."""
+        if self._shell is None:
+            return {"message": "Shell not ready"}
+        self._shell.hide()
+        return {"message": "UI hidden"}
+
+    def toggle_ui(self) -> dict:
+        """Toggle shell window visibility."""
+        if self._shell is None:
+            return {"message": "Shell not ready"}
+        self._shell.toggle()
+        state = "visible" if self._shell.is_visible else "hidden"
+        return {"message": f"UI toggled to {state}"}
+
+    def is_ui_visible(self) -> dict:
+        """Query current shell window visibility."""
+        if self._shell is None:
+            return {"message": "Shell not ready"}
+        return {"message": "visible" if self._shell.is_visible else "hidden"}
+
+    def _register_camera_commands(self, container) -> None:
+        """Register camera commands in CommandRegistry (for palette + voice)."""
+        if not container.has("command_registry"):
+            return
+        try:
+            from aether.core.command_registry import CommandInfo
+            registry = container.resolve("command_registry")
+            cmds = [
+                CommandInfo("ui.camera.toggle", "Toggle camera between PiP and background", "ui"),
+                CommandInfo("ui.camera.show", "Show camera feed", "ui"),
+                CommandInfo("ui.camera.hide", "Hide camera feed", "ui"),
+                CommandInfo("ui.camera.mode.background", "Camera: full-screen background", "ui"),
+                CommandInfo("ui.camera.mode.pip", "Camera: picture-in-picture", "ui"),
+                CommandInfo("ui.camera.mode.minimal", "Camera: minimal PiP", "ui"),
+                CommandInfo("ui.camera.mode.hidden", "Camera: hidden", "ui"),
+                CommandInfo("ui.shell.show", "Show the Aether UI window", "ui"),
+                CommandInfo("ui.shell.hide", "Hide the Aether UI window", "ui"),
+                CommandInfo("ui.shell.toggle", "Toggle Aether UI window visibility", "ui"),
+                CommandInfo("ui.shell.is_visible", "Check if Aether UI window is visible", "ui"),
+            ]
+            for cmd in cmds:
+                registry.register(cmd)
+            logger.info("Camera + shell commands registered in CommandRegistry")
+        except Exception:
+            logger.debug("Could not register camera commands in CommandRegistry")
