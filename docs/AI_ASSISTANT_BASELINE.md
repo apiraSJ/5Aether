@@ -14,36 +14,33 @@ This document records the baseline state of the Aether repository before beginni
 
 ---
 
+## Current Status (UI Lifecycle)
+
+- **Test Count**: `921`
+- **Passing Count**: `921`
+- **Failing Count**: `0`
+- **Latest Commit**: `dfd5d36` feat: add UI-1 shell show/hide API
+
+### Commit History
+
+```
+dfd5d36 feat: add UI-1 shell show/hide API       (921 tests)
+d73b82a feat: add background startup mode          (909 tests)
+1f606d7 feat: add UIShell UI foundation            (909 tests)
+f363b5c feat: Phase 3.3 Intent Reasoning
+3ad8595 feat: Phase 3.2 Memory Retriever
+```
+
+---
+
 ## Git State
 - **Current Branch**: `main`
-- **Current Commit**: `ad1b480906ec025b04034dcc8e1cd3ad29102639`
-- **Commit Date**: `Mon Jul 27 03:38:20 2026 +0700`
-- **Commit Message**: `docs: update README, ARCHITECTURE, ROADMAP for Backend v1.0.0`
+- **Current Commit**: `dfd5d3600db0019dc04f0d8b3ed8e75922fd8a60`
+- **Commit Date**: `Mon Sep 21 11:12:56 2026 +0700`
+- **Commit Message**: `feat: add UI-1 shell show/hide API`
 - **Working Tree Status**:
-  - **Modified Files**:
-    - `README.md`
-    - `aether/__main__.py`
-    - `aether/core/adaptive_scheduler.py`
-    - `aether/core/application.py`
-    - `aether/core/event_bus_v2.py`
-    - `aether/core/event_type.py`
-    - `aether/core/plugin.py`
-    - `aether/core/profiler.py`
-    - `aether/memory/__init__.py`
-    - `aether/phase_d/camera_plugin.py`
-    - `aether/plugins/gui_plugin.py`
-    - `aether/plugins/memory_plugin.py`
-    - `aether/plugins/system_commands_plugin.py`
-    - `aether/ui/camera_widget.py`
-    - `aether/ui/hud_manager.py`
-    - `aether/ui/overlay_model.py`
-    - `aether/ui/overlay_widget.py`
-    - `aether/ui/performance_hud.py`
-    - `aether/vision/plugins.py`
-    - `config/default.yaml`
-    - `config/vision.yaml`
-    - `tests/phase_a/test_boot.py`
-    - `tests/test_virtual_cursor.py`
+  - **Modified Files**: 21 (pre-existing work for future phases)
+  - **Untracked Files**: 60+ (new features in progress)
 
 ---
 

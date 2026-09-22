@@ -8,6 +8,21 @@ Aether is a **command-driven operating system** with a unified interaction layer
 Input → EventBus → IntentResolver → CommandBus → Handler → ResultPipeline → Output
 ```
 
+### UI Lifecycle Semantics (locked)
+
+```
+Background ≠ Shutdown
+Hide ≠ Shutdown
+Quit = real graceful shutdown
+```
+
+| Action | Result |
+|--------|--------|
+| Normal boot | UI visible, runtime active |
+| `--background` | UI hidden, runtime active |
+| Hide (button/tray/hotkey) | UI hidden, runtime active |
+| Quit (system.shutdown) | Real graceful shutdown |
+
 ---
 
 ## Core Lifecycle
@@ -15,8 +30,9 @@ Input → EventBus → IntentResolver → CommandBus → Handler → ResultPipel
 ```text
 Boot (Application.boot)
   │
-  ├─ Load config (vision.yaml)
+  ├─ Load config (default.yaml)
   ├─ Create ServiceContainer
+  ├─ --background? → override gui.start_visible = False
   ├─ Initialize plugins (order matters)
   ├─ Start camera thread
   └─ Start main loop
@@ -24,17 +40,19 @@ Boot (Application.boot)
        ▼
 Tick (30 Hz)
   │
-  ├─ CameraPlugin → capture frame → FrameBroker
-  ├─ HandPerceptionPlugin (worker thread) → MediaPipe → PerceptionResult
-  ├─ ObjectSpatialPlugin (worker thread) → YOLO → PerceptionResult
-  ├─ VisionAdapterPlugin (worker thread) → PerceptionResult → EventBus
   ├─ CommandBus.update() → execute queued commands
+  ├─ Services.update(dt) → domain logic
+  ├─ GUIPlugin.update(dt)
+  │     ├─ UIShell.update() → HUD render + processEvents
+  │     └─ _poll_hotkey() → Ctrl+Alt+Space → toggle_ui()
   ├─ EventBus.flush() → deliver all queued events
-  └─ GUIPlugin → render PySide6 overlay
+  └─ AdaptiveScheduler + Profiler
        │
        ▼
 Shutdown
   │
+  ├─ Unregister global hotkey
+  ├─ UIShell.shutdown() → save layout, hide window
   ├─ Signal all threads to stop
   ├─ Join threads (timeout 2s)
   └─ Release resources
@@ -176,15 +194,67 @@ command_bus.dispatch(Command(name="my.command", params={}))
 
 ## GUI Architecture
 
+### UIShell (UI Lifecycle Owner)
+
+UIShell owns the window and all widgets. GUIPlugin is the lifecycle integration layer.
+
+```text
+GUIPlugin ──builds──> UIContext ──> UIShell ──owns──> widgets
+```
+
+**UIShell responsibilities:**
+- Window creation, show/hide/toggle
+- Camera panel management
+- Panel registration and layout
+- Workspace save/restore
+- HUD render pipeline (via HUDManager)
+
+**GUIPlugin responsibilities:**
+- DI composition (builds UIContext + UIShell)
+- Lifecycle integration (start/update/stop)
+- Global hotkey registration (Ctrl+Alt+Space)
+- Command routing (ui.shell.*, ui.camera.*, ui.panel.*)
+
+### UIShell API
+
+```python
+class UIShell:
+    def show(self) -> None:      # Show window
+    def hide(self) -> None:      # Hide window (no shutdown)
+    def toggle(self) -> None:    # Toggle visibility
+    @property
+    def is_visible(self) -> bool: # Query visibility
+```
+
+### GUIPlugin API
+
+```python
+class GUIPlugin(TickablePlugin):
+    def show_ui(self) -> dict:      # → UIShell.show()
+    def hide_ui(self) -> dict:      # → UIShell.hide()
+    def toggle_ui(self) -> dict:    # → UIShell.toggle()
+    def is_ui_visible(self) -> dict: # → UIShell.is_visible
+```
+
 ### PySide6 Overlay
 - `OverlayWidget` — main transparent window
 - `HUDManager` — manages 4 render layers with throttle
 - Widgets read from `OverlayModel` only — stateless renderers
 - Per-object QPainterPath caching with hash invalidation
 
-### F1/F2 Toggle
-- F1: Toggle object list panel
+### Keyboard Shortcuts (in-window)
+
+- Ctrl+Space / Ctrl+K: Toggle command palette
+- F3: Toggle camera
+- Ctrl+Shift+1-4: Camera mode switching
+- F1: Toggle timeline
 - F2: Toggle performance HUD
+
+### Global Hotkey (system-wide, UI-2)
+
+- Ctrl+Alt+Space: Toggle UI visibility (works even when UI is hidden)
+- Registered via Win32 `RegisterHotKey` (ctypes)
+- Polled in `GUIPlugin.update()` via `PeekMessage`
 
 ---
 
@@ -205,7 +275,7 @@ Hardware budgets (adjusted for USB webcam reality):
 
 | Thread | Purpose |
 |--------|---------|
-| Main | Tick loop, GUI, EventBus flush |
+| Main | Tick loop, GUI, EventBus flush, hotkey polling |
 | Camera | Frame capture at 30fps |
 | HandPerception | MediaPipe gesture recognition |
 | ObjectSpatial | YOLO object detection |

@@ -1,10 +1,17 @@
-# Aether — AI Spatial Assistant
+```
+     _    ____   ____ _   _ _____ _   _ ______  __
+    / \  |  _ \ / ___| | | | ____| \ | | __ \ \ / /
+   / _ \ | |_) | |   | |_| |  _| |  \| |  _ \\ V /
+  / ___ \|  _ <| |___|  _  | |___| |\  | |_) || |
+ /_/   \_\_| \_\\____|_| |_|_____|_| \_|____/ |_|
+```
 
-> Make the brain useful to people.
+> Spatial Intelligence AI — Built for desktop today, architected for XR tomorrow.
 
-Aether is a command-driven AI Spatial Assistant with a plugin-based runtime, event-driven architecture, and vision pipeline. Built for desktop today, architected for XR Smart Glasses tomorrow.
+Aether is a command-driven AI Spatial Assistant with a plugin-based runtime, event-driven architecture, and vision pipeline. Boot → Tick → Shutdown lifecycle, 70+ event types, config-driven plugins, and a vision pipeline targeting ≤120ms E2E latency.
 
 **Backend v1.0.0** — Architecture Stable (tagged `backend-v1.0.0`)
+**UI Lifecycle** — UI-0 through UI-1 complete, UI-2 in progress
 
 ---
 
@@ -34,6 +41,7 @@ python -m aether --mode vision      # launch with camera + GUI
 
 ```bash
 python -m aether --mode vision       # Full vision pipeline + GUI overlay
+python -m aether --background        # Start with UI hidden (background mode)
 python -m aether --profile           # Performance profiling (30s default)
 python -m aether --profile --duration 60  # Custom duration
 ```
@@ -47,7 +55,39 @@ scripts\profile.bat 30       # 30-second hardware validation
 ### Tests
 
 ```bash
-python -m pytest tests/ -v
+python -m pytest tests/ -v           # All 921 tests
+```
+
+---
+
+## UI Lifecycle
+
+### Boot Modes
+
+| Mode | Command | Behavior |
+|------|---------|----------|
+| Normal | `python -m aether` | UI visible, runtime active |
+| Background | `python -m aether --background` | UI hidden, runtime active |
+
+### Runtime Commands
+
+| Command | Description |
+|---------|-------------|
+| `ui.shell.show` | Show the Aether UI window |
+| `ui.shell.hide` | Hide the Aether UI window |
+| `ui.shell.toggle` | Toggle Aether UI window visibility |
+| `ui.shell.is_visible` | Check if Aether UI window is visible |
+
+### Global Hotkey (UI-2, planned)
+
+- **Ctrl+Alt+Space**: Toggle UI visibility (system-wide, works even when UI is hidden)
+
+### Lifecycle Semantics
+
+```
+Background ≠ Shutdown
+Hide ≠ Shutdown
+Quit = real graceful shutdown
 ```
 
 ---
@@ -134,7 +174,7 @@ Aether/
 │   │   ├── rule_intent_plugin.py  # NL → Command (14 regex patterns)
 │   │   ├── intent_resolver_plugin.py  # Event-driven intent resolution
 │   │   ├── result_formatter_plugin.py # Colored CLI output
-│   │   ├── gui_plugin.py          # PySide6 Vision HUD
+│   │   ├── gui_plugin.py          # GUIPlugin — UIShell lifecycle, hotkey
 │   │   └── memory_plugin.py       # Memory CRUD commands
 │   ├── vision/                    # Vision pipeline
 │   │   └── plugins.py             # VisionAdapterPlugin (state → events)
@@ -147,7 +187,10 @@ Aether/
 │   │   ├── hand_plugin.py         # MediaPipe GestureRecognizer
 │   │   ├── object_plugin.py       # YOLOv8 + solvePnP
 │   │   └── cursor_plugin.py       # Cursor + PinchClick
-│   ├── ui/                        # GUI widgets
+│   ├── ui/                        # GUI widgets + lifecycle
+│   │   ├── ui_shell.py            # UIShell — owns window, camera, panels
+│   │   ├── ui_context.py          # UIContext — DI bundle for widgets
+│   │   ├── camera_widget.py       # Camera feed widget
 │   │   ├── overlay_widget.py      # QPainterPath cache, QStaticText
 │   │   ├── object_list_widget.py  # Object list panel
 │   │   ├── gesture_widget.py      # Gesture status display
@@ -165,7 +208,7 @@ Aether/
 │   ├── tick.bat                   # Tick mode launcher
 │   └── profile.bat                # Performance profiler
 ├── models/                        # ML weights (gitignored)
-├── tests/                         # 128 tests
+├── tests/                         # 921 tests
 ├── pyproject.toml
 └── main.py                        # Legacy entry point
 ```
@@ -230,8 +273,9 @@ plugins:
 ## Testing
 
 ```bash
-python -m pytest tests/ -v           # All 128 tests
-python -m pytest tests/test_cli_system.py -v  # CLI + intent tests
+python -m pytest tests/ -v           # All 921 tests
+python -m pytest tests/test_ui_lifecycle.py -v  # UI lifecycle tests (30)
+python -m pytest tests/test_cli_system.py -v    # CLI + intent tests
 ```
 
 ---
@@ -242,6 +286,9 @@ python -m pytest tests/test_cli_system.py -v  # CLI + intent tests
 |------|----------|
 | `docs/ARCHITECTURE.md` | System architecture reference |
 | `docs/ROADMAP.md` | Development roadmap |
+| `docs/UI-2-plan.md` | UI-2 Global Hotkey implementation plan |
+| `docs/workspace.md` | Workspace + Layout system |
+| `docs/AI_ASSISTANT_BASELINE.md` | Baseline state before AI integration |
 
 ---
 
