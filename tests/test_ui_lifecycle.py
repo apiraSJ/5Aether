@@ -44,7 +44,7 @@ def _flush(bus: EventBus) -> None:
     bus.flush()
 
 
-def _make_container(tmp_path, *, with_broker=False, start_visible=None):
+def _make_container(tmp_path, *, with_broker=False, start_visible=None, hotkey_toggle=None):
     from aether.core.command_bus import CommandBus
     from aether.core.result_pipeline import ResultPipeline
     from aether.core.service_container import ServiceContainer
@@ -91,6 +91,8 @@ def _make_container(tmp_path, *, with_broker=False, start_visible=None):
             }
             if start_visible is not None:
                 cfg["gui.start_visible"] = start_visible
+            if hotkey_toggle is not None:
+                cfg["gui.hotkey_toggle"] = hotkey_toggle
             return cfg.get(key, default)
 
     container = ServiceContainer()
@@ -553,4 +555,164 @@ class TestShellCommands:
             assert result["message"] == "hidden"
         finally:
             plugin.stop()
+            _flush(bus)
+
+
+# ── UI-2: Global hotkey ─────────────────────────────────────────────
+
+class TestHotkeyComboParser:
+    """UI-2: 'ctrl+alt+space' -> (MOD_CONTROL|MOD_ALT, VK_SPACE). Pure logic."""
+
+    def test_ctrl_alt_space(self):
+        from aether.plugins.gui_plugin import _parse_hotkey
+        assert _parse_hotkey("ctrl+alt+space") == (0x0002 | 0x0001, 0x20)
+
+    def test_single_modifier(self):
+        from aether.plugins.gui_plugin import _parse_hotkey
+        assert _parse_hotkey("ctrl+space") == (0x0002, 0x20)
+
+    def test_letter_and_function_keys(self):
+        from aether.plugins.gui_plugin import _parse_hotkey
+        assert _parse_hotkey("shift+a") == (0x0004, 0x41)
+        assert _parse_hotkey("alt+f4") == (0x0001, 0x73)
+
+    def test_case_insensitive(self):
+        from aether.plugins.gui_plugin import _parse_hotkey
+        assert _parse_hotkey("Ctrl+Alt+Space") == _parse_hotkey("ctrl+alt+space")
+
+    def test_unknown_token_raises(self):
+        import pytest
+        from aether.plugins.gui_plugin import _parse_hotkey
+        with pytest.raises(ValueError):
+            _parse_hotkey("ctrl+bogus")
+        with pytest.raises(ValueError):
+            _parse_hotkey("")
+
+
+def _fake_windll(monkeypatch, register_ret=1, hotkey_hits=0):
+    """Inject a fake ctypes.windll.user32 (works on any platform)."""
+    import ctypes
+    from types import SimpleNamespace
+    state = {"register_calls": [], "unregister_calls": [], "peek_calls": 0}
+
+    class _FakeUser32:
+        def RegisterHotKey(self, hwnd, hid, mod, vk):
+            state["register_calls"].append((hwnd, hid, mod, vk))
+            return register_ret
+
+        def UnregisterHotKey(self, hwnd, hid):
+            state["unregister_calls"].append((hwnd, hid))
+            return 1
+
+        def PeekMessageW(self, lpmsg, hwnd, mn, mx, remove):
+            state["peek_calls"] += 1
+            if state["peek_calls"] <= hotkey_hits:
+                msg = lpmsg._obj  # byref() target
+                msg.message = 0x0312  # WM_HOTKEY
+                msg.wParam = 1  # _HOTKEY_ID
+                return 1
+            return 0
+
+    monkeypatch.setattr(ctypes, "windll", SimpleNamespace(user32=_FakeUser32()), raising=False)
+    return state
+
+
+class TestHotkeyRegistration:
+    """UI-2: Register/Unregister lifecycle against a fake Win32 API."""
+
+    def test_register_success_sets_flag(self, monkeypatch):
+        from aether.plugins.gui_plugin import GUIPlugin
+        state = _fake_windll(monkeypatch, register_ret=1)
+        plugin = GUIPlugin()
+        assert plugin._register_hotkey(0x0002 | 0x0001, 0x20) is True
+        assert plugin._hotkey_registered is True
+        assert state["register_calls"] == [(None, 1, 0x0002 | 0x0001, 0x20)]
+
+    def test_register_refused_clears_flag(self, monkeypatch):
+        from aether.plugins.gui_plugin import GUIPlugin
+        _fake_windll(monkeypatch, register_ret=0)
+        plugin = GUIPlugin()
+        assert plugin._register_hotkey(0x0002 | 0x0001, 0x20) is False
+        assert plugin._hotkey_registered is False
+
+    def test_unregister_clears_flag(self, monkeypatch):
+        from aether.plugins.gui_plugin import GUIPlugin
+        state = _fake_windll(monkeypatch)
+        plugin = GUIPlugin()
+        plugin._hotkey_registered = True
+        plugin._unregister_hotkey()
+        assert plugin._hotkey_registered is False
+        assert state["unregister_calls"] == [(None, 1)]
+
+    def test_poll_dispatches_toggle_per_hit(self, monkeypatch):
+        from aether.plugins.gui_plugin import GUIPlugin
+        _fake_windll(monkeypatch, hotkey_hits=2)
+        plugin = GUIPlugin()
+        toggles = []
+        plugin.toggle_ui = lambda: toggles.append(1) or {"message": "toggled"}
+        plugin._poll_hotkey()
+        assert toggles == [1, 1]
+
+
+class TestHotkeyLifecycle:
+    """UI-2: start/update/stop wiring (platform forced to win32)."""
+
+    def _make_plugin(self, tmp_path, hotkey_toggle="ctrl+alt+space"):
+        from aether.plugins.gui_plugin import GUIPlugin
+        container, context, bus = _make_container(tmp_path, hotkey_toggle=hotkey_toggle)
+        plugin = GUIPlugin()
+        plugin.initialize(container)
+        return plugin, container, bus
+
+    def test_start_registers_when_configured(self, qapp, tmp_path, monkeypatch):
+        import sys
+        from aether.plugins.gui_plugin import GUIPlugin
+        monkeypatch.setattr(sys, "platform", "win32")
+        _fake_windll(monkeypatch, register_ret=1)
+        registered = []
+        monkeypatch.setattr(GUIPlugin, "_register_hotkey",
+                            lambda self, mod, vk: registered.append((mod, vk)) or True)
+        plugin, container, bus = self._make_plugin(tmp_path)
+        try:
+            plugin.start()
+            assert registered == [(0x0002 | 0x0001, 0x20)]
+        finally:
+            plugin.stop()
+            _flush(bus)
+
+    def test_start_skips_when_unconfigured(self, qapp, tmp_path, monkeypatch):
+        import sys
+        from aether.plugins.gui_plugin import GUIPlugin
+        monkeypatch.setattr(sys, "platform", "win32")
+        _fake_windll(monkeypatch, register_ret=1)
+        registered = []
+        monkeypatch.setattr(GUIPlugin, "_register_hotkey",
+                            lambda self, mod, vk: registered.append((mod, vk)) or True)
+        # hotkey_toggle=None -> _FakeConfig omits the key entirely.
+        plugin, container, bus = self._make_plugin(tmp_path, hotkey_toggle=None)
+        try:
+            plugin.start()
+            assert registered == []
+            assert plugin._hotkey_registered is False
+        finally:
+            plugin.stop()
+            _flush(bus)
+
+    def test_update_polls_and_stop_unregisters(self, qapp, tmp_path, monkeypatch):
+        import sys
+        monkeypatch.setattr(sys, "platform", "win32")
+        state = _fake_windll(monkeypatch, register_ret=1, hotkey_hits=1)
+        plugin, container, bus = self._make_plugin(tmp_path)
+        try:
+            plugin.start()
+            assert plugin._hotkey_registered is True
+            toggles = []
+            plugin.toggle_ui = lambda: toggles.append(1) or {"message": "toggled"}
+            plugin.update(0.016)
+            assert toggles == [1]
+            assert state["peek_calls"] >= 1
+            plugin.stop()
+            assert plugin._hotkey_registered is False
+            assert state["unregister_calls"] == [(None, 1)]
+        finally:
             _flush(bus)

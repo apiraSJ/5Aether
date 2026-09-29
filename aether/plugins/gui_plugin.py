@@ -22,6 +22,54 @@ from aether.core.service_container import ServiceContainer
 
 logger = logging.getLogger("Aether.GUIPlugin")
 
+# ── UI-2: Global hotkey (Win32, stdlib ctypes — no new dependencies) ──
+# Registered thread-scoped (hwnd=NULL) so it fires even when the window
+# is hidden (background mode). Polled from update(); never touches UIShell
+# internals — dispatch goes through toggle_ui() like any other caller.
+
+_HOTKEY_ID = 1
+_WM_HOTKEY = 0x0312
+_PM_REMOVE = 0x0001
+
+_MOD_MAP = {
+    "ctrl": 0x0002, "control": 0x0002,
+    "alt": 0x0001,
+    "shift": 0x0004,
+    "win": 0x0008, "super": 0x0008, "meta": 0x0008,
+}
+
+_VK_MAP = {
+    "space": 0x20, "spacebar": 0x20,
+    "esc": 0x1B, "escape": 0x1B,
+    "tab": 0x09, "enter": 0x0D, "return": 0x0D,
+}
+
+
+def _parse_hotkey(combo: str) -> tuple[int, int]:
+    """Parse 'ctrl+alt+space' into (win32 modifiers, virtual-key code).
+
+    Last token is the key, preceding tokens are modifiers.
+    Raises ValueError on empty or unknown tokens.
+    """
+    parts = [p.strip().lower() for p in combo.split("+") if p.strip()]
+    if not parts:
+        raise ValueError(f"Empty hotkey combo: {combo!r}")
+    *mod_names, key_name = parts
+    modifiers = 0
+    for name in mod_names:
+        if name not in _MOD_MAP:
+            raise ValueError(f"Unknown hotkey modifier: {name!r} in {combo!r}")
+        modifiers |= _MOD_MAP[name]
+    if key_name in _VK_MAP:
+        vk = _VK_MAP[key_name]
+    elif len(key_name) == 1 and ("a" <= key_name <= "z" or "0" <= key_name <= "9"):
+        vk = ord(key_name.upper())
+    elif key_name.startswith("f") and key_name[1:].isdigit() and 1 <= int(key_name[1:]) <= 12:
+        vk = 0x70 + int(key_name[1:]) - 1
+    else:
+        raise ValueError(f"Unknown hotkey key: {key_name!r} in {combo!r}")
+    return modifiers, vk
+
 
 class GUIPlugin(TickablePlugin):
     """DI composition root. Builds UIContext + UIShell, drives lifecycle."""
@@ -40,6 +88,7 @@ class GUIPlugin(TickablePlugin):
         self._workspace_manager = None
         self._context = None
         self._shell = None
+        self._hotkey_registered = False
         self._running = False
         self._boot_time = time.time()
         self._is_vision_mode = False
@@ -191,6 +240,17 @@ class GUIPlugin(TickablePlugin):
             self._shell = UIShell(self._context)
             self._shell.build(app=self._app, vision_mode=self._is_vision_mode, show_window=show_window)
 
+            # UI-2: register global toggle hotkey (thread-scoped, works hidden)
+            if sys.platform == "win32":
+                combo = ""
+                if self._context is not None and self._context.config is not None:
+                    combo = self._context.config.get("gui.hotkey_toggle", "") or ""
+                if combo:
+                    try:
+                        self._register_hotkey(*_parse_hotkey(combo))
+                    except Exception:
+                        logger.exception("Hotkey registration failed for %r", combo)
+
             self._running = True
             logger.info("GUIPlugin UI started (visible=%s)", show_window)
         except ImportError:
@@ -204,9 +264,15 @@ class GUIPlugin(TickablePlugin):
     def update(self, dt: float) -> None:
         if self._app and self._running and self._shell is not None:
             self._shell.update()
+        # UI-2: poll thread message queue for WM_HOTKEY
+        if sys.platform == "win32" and self._hotkey_registered:
+            self._poll_hotkey()
 
     def stop(self) -> None:
         self._running = False
+        # UI-2: release the global hotkey before tearing down the shell
+        if self._hotkey_registered:
+            self._unregister_hotkey()
         if self._shell is not None:
             self._shell.shutdown()
 
@@ -300,6 +366,59 @@ class GUIPlugin(TickablePlugin):
         if self._shell is None:
             return {"message": "Shell not ready"}
         return {"message": "visible" if self._shell.is_visible else "hidden"}
+
+    # ── UI-2: Global hotkey (Win32 RegisterHotKey, polled per tick) ──
+
+    def _register_hotkey(self, modifiers: int, vk: int) -> bool:
+        """Register the thread-scoped global toggle hotkey. Returns success."""
+        import ctypes
+        try:
+            ok = ctypes.windll.user32.RegisterHotKey(None, _HOTKEY_ID, modifiers, vk)
+        except Exception:
+            logger.exception("RegisterHotKey call failed")
+            return False
+        self._hotkey_registered = bool(ok)
+        if ok:
+            logger.info("Global hotkey registered (id=%d mod=%d vk=%d)", _HOTKEY_ID, modifiers, vk)
+        else:
+            logger.warning("RegisterHotKey refused (id=%d mod=%d vk=%d)", _HOTKEY_ID, modifiers, vk)
+        return self._hotkey_registered
+
+    def _poll_hotkey(self) -> None:
+        """Drain WM_HOTKEY from the thread queue; each fire toggles the UI."""
+        import ctypes
+
+        # Portable field types (match Win32 MSG layout; avoids ctypes.wintypes
+        # so this method stays import-safe and testable on non-Windows).
+        class _MSG(ctypes.Structure):
+            _fields_ = [
+                ("hwnd", ctypes.c_void_p),
+                ("message", ctypes.c_uint),
+                ("wParam", ctypes.c_void_p),
+                ("lParam", ctypes.c_void_p),
+                ("time", ctypes.c_ulong),
+                ("pt_x", ctypes.c_long),
+                ("pt_y", ctypes.c_long),
+            ]
+
+        try:
+            user32 = ctypes.windll.user32
+            msg = _MSG()
+            while user32.PeekMessageW(ctypes.byref(msg), None, _WM_HOTKEY, _WM_HOTKEY, _PM_REMOVE):
+                if msg.message == _WM_HOTKEY and msg.wParam == _HOTKEY_ID:
+                    self.toggle_ui()
+        except Exception:
+            logger.exception("Hotkey poll failed")
+
+    def _unregister_hotkey(self) -> None:
+        """Release the thread-scoped global hotkey. Best-effort."""
+        import ctypes
+        try:
+            ctypes.windll.user32.UnregisterHotKey(None, _HOTKEY_ID)
+        except Exception:
+            logger.exception("UnregisterHotKey call failed")
+        finally:
+            self._hotkey_registered = False
 
     def _register_camera_commands(self, container) -> None:
         """Register camera commands in CommandRegistry (for palette + voice)."""
