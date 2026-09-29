@@ -1,0 +1,33 @@
+{
+  "name": "cyberpunk",
+  "description": "Cyberpunk neon theme for Aether",
+  "colors": {
+    "background": "#080810",
+    "surface": "#101020",
+    "primary": "#00ffff",
+    "secondary": "#ff00ff",
+    "warning": "#ffcc00",
+    "error": "#ff4444",
+    "success": "#00ff88",
+    "text": "#e0e0ff",
+    "text_muted": "#6060a0",
+    "border": "rgba(0,255,255,0.25)"
+  },
+  "opacity": {
+    "panel": 0.85,
+    "overlay": 0.75,
+    "notification": 0.95
+  },
+  "typography": {
+    "font": "Consolas",
+    "title_size": 18,
+    "body_size": 13,
+    "mono_size": 11
+  },
+  "shape": {
+    "border_radius": 12
+  },
+  "animation": {
+    "duration_ms": 200
+  }
+}

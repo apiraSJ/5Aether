@@ -37,3 +37,12 @@ vision_log.txt
 # OS
 Thumbs.db
 .DS_Store
+
+# Runtime data (generated — never track; C0)
+*.db
+*.db-wal
+*.db-shm
+aether/data/
+data/layouts/last*.json
+data/layouts/test_*.json
+tests/_test_shutdown/

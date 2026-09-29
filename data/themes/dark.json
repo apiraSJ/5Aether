@@ -1,0 +1,33 @@
+{
+  "name": "dark",
+  "description": "Default dark theme for Aether",
+  "colors": {
+    "background": "#0a0a0a",
+    "surface": "#141414",
+    "primary": "#00ccff",
+    "secondary": "#6366f1",
+    "warning": "#f59e0b",
+    "error": "#ef4444",
+    "success": "#22c55e",
+    "text": "#e0e0e0",
+    "text_muted": "#888888",
+    "border": "rgba(255,255,255,0.12)"
+  },
+  "opacity": {
+    "panel": 0.92,
+    "overlay": 0.80,
+    "notification": 0.95
+  },
+  "typography": {
+    "font": "Consolas",
+    "title_size": 16,
+    "body_size": 12,
+    "mono_size": 11
+  },
+  "shape": {
+    "border_radius": 8
+  },
+  "animation": {
+    "duration_ms": 150
+  }
+}

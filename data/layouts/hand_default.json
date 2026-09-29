@@ -1,0 +1,52 @@
+{
+  "name": "hand_default",
+  "description": "Default hand workspace layout — camera top, 2x2 grid below",
+  "workspace": "hand",
+  "panels": [
+    {
+      "id": "camera_panel",
+      "x": 0,
+      "y": 0,
+      "w": 1920,
+      "h": 540,
+      "z_index": 0,
+      "visible": true
+    },
+    {
+      "id": "memory",
+      "x": 0,
+      "y": 560,
+      "w": 950,
+      "h": 520,
+      "z_index": 10,
+      "visible": true
+    },
+    {
+      "id": "ai_chat",
+      "x": 970,
+      "y": 560,
+      "w": 950,
+      "h": 520,
+      "z_index": 10,
+      "visible": true
+    },
+    {
+      "id": "tasks",
+      "x": 0,
+      "y": 1100,
+      "w": 950,
+      "h": 460,
+      "z_index": 10,
+      "visible": true
+    },
+    {
+      "id": "dashboard",
+      "x": 970,
+      "y": 1100,
+      "w": 950,
+      "h": 460,
+      "z_index": 10,
+      "visible": true
+    }
+  ]
+}
