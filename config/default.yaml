@@ -1,7 +1,8 @@
 app:
   name: "Aether"
-  version: "0.2.0"
+  version: "1.0.0"
   tick_rate: 30
+  mode: "vision"
 
 logging:
   level: "INFO"
@@ -12,22 +13,64 @@ event_bus:
   queued: true
 
 plugins:
-  - module: "aether.plugins.memory_plugin"
-    class: "MemoryPlugin"
-    enabled: true
-  - module: "aether.plugins.history_plugin"
-    class: "HistoryPlugin"
-    enabled: true
-  - module: "aether.plugins.system_plugin"
-    class: "SystemPlugin"
-    enabled: true
-  - module: "aether.plugins.keyboard_plugin"
-    class: "KeyboardInputPlugin"
-    enabled: true
+  # ── Core system ───────────────────────────────────────────────────
+  - module: "aether.plugins.system_commands_plugin"
+    class: "SystemCommandPlugin"
+
+  - module: "aether.plugins.performance_plugin"
+    class: "PerformancePlugin"
+
   - module: "aether.plugins.gui_plugin"
     class: "GUIPlugin"
-    enabled: true
+
+  # ── Intent pipeline (CLI / Voice / GUI palette / AI unify here) ──
+  - module: "aether.plugins.rule_intent_plugin"
+    class: "RuleIntentPlugin"
+
+  - module: "aether.plugins.intent_resolver_plugin"
+    class: "IntentResolverPlugin"
+
+  # ── Memory core ──────────────────────────────────────────────────
+  - module: "aether.plugins.memory_plugin"
+    class: "MemoryPlugin"
+
+  # ── AI assistant (owns ai.chat command) ──────────────────────────
+  - module: "aether.plugins.ai_plugin"
+    class: "AIPlugin"
+
+  # ── Input ─────────────────────────────────────────────────────────
+  - module: "aether.plugins.keyboard_plugin"
+    class: "KeyboardInputPlugin"
+
+  # ── Interaction layer ─────────────────────────────────────────────
+  - module: "aether.plugins.interaction_plugin"
+    class: "InteractionPlugin"
+
+memory:
+  db_path: "data/memory.db"
+
+ai:
+  enabled: true
+  provider: echo
+
 gui:
   start_visible: true
   system_tray: false
   hotkey_toggle: "ctrl+alt+space"
+  status_bar:
+    enabled: true
+    height: 28
+  notifications:
+    enabled: true
+    max_visible: 3
+    auto_dismiss_ms: 4000
+    position: "bottom_right"
+    spacing: 8
+  camera:
+    mode: "pip"
+    width: 320
+    height: 180
+    anchor: "bottom_right"
+    margin: 10
+    snap_threshold: 40
+    dim_background: true

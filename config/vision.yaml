@@ -4,7 +4,7 @@
 
 app:
   name: "Aether"
-  version: "0.3.0"
+  version: "1.0.0"
   tick_rate: 30
   mode: "vision"
 
@@ -30,6 +30,17 @@ plugins:
 
   - module: "aether.plugins.gui_plugin"
     class: "GUIPlugin"
+
+  - module: "aether.plugins.interaction_plugin"
+    class: "InteractionPlugin"
+
+  # ── Memory core ──────────────────────────────────────────────────
+  - module: "aether.plugins.memory_plugin"
+    class: "MemoryPlugin"
+
+  # ── AI assistant (owns ai.chat command) ──────────────────────────
+  - module: "aether.plugins.ai_plugin"
+    class: "AIPlugin"
 
   # ── Command system (must load before input adapters) ─────────────
   - module: "aether.plugins.system_commands_plugin"
@@ -97,15 +108,8 @@ plugins:
       sensitivity: 2.0
       dead_zone: 1
 
-  - module: "aether.phase_d.cursor_plugin"
-    class: "PinchClickPlugin"
-
-  - module: "aether.phase_c.gesture_input_plugin"
-    class: "GestureInputPlugin"
-
-  # PinchGesturePlugin disabled — PinchClickPlugin already handles pinch→click
-  # - module: "aether.phase_c.gesture_input_plugin"
-  #   class: "PinchGesturePlugin"
+  - module: "aether.plugins.gesture_plugin"
+    class: "GesturePlugin"
 
 cursor:
   smoothing: 0.15
@@ -113,3 +117,7 @@ cursor:
   sensitivity: 2.0
   prediction: 0.12
   mirror_x: true
+
+ai:
+  enabled: true
+  provider: echo

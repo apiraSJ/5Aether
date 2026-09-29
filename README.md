@@ -235,7 +235,7 @@ All settings in `config/vision.yaml`:
 ```yaml
 app:
   name: "Aether"
-  version: "0.3.0"
+  version: "1.0.0"
   tick_rate: 30
   mode: "vision"
 
