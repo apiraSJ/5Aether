@@ -158,6 +158,8 @@ class EventType(str, Enum):
     MEMORY_UPDATED = "memory.updated"
     MEMORY_PINNED = "memory.pinned"
     MEMORY_UNPINNED = "memory.unpinned"
+    MEMORY_SESSION_CREATED = "memory.session.created"
+    MEMORY_SESSION_RESTORED = "memory.session.restored"
 
     # ── Task ───────────────────────────────────────────────────────────────
     TASK_CREATED = "task.created"

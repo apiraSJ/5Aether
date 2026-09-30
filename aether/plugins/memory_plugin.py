@@ -86,6 +86,18 @@ _MEMORY_COMMANDS = [
         description="Force expiration of stale records",
         category="memory",
     ),
+    CommandInfo(
+        name="memory.continue",
+        description="Reconstruct your last work context (or start a new work session)",
+        category="memory",
+        params_help="[summary=<text>] [fact=<text>]",
+        aliases=("continue_work",),
+        examples=(
+            "memory.continue",
+            "memory.continue summary=\"C3 cleanup in the Aether repo\"",
+            "memory.continue fact=\"Need to fix layout manager paths\"",
+        ),
+    ),
 ]
 
 
@@ -165,6 +177,20 @@ class MemoryPlugin(PluginBase):
                 }, source=self.name))
             except Exception as e:
                 logger.warning("Failed to publish memory.ready: %s", e)
+        # M1 Memory UX: after the first-boot seed, restore the user's last
+        # work session so AI/UI can reconstruct context on return without
+        # the user re-explaining it.
+        if self._memory is not None and self._event_bus is not None:
+            try:
+                session = self._memory.get_latest_session()
+                if session:
+                    self._event_bus.publish(Event(
+                        type=EventType.MEMORY_SESSION_RESTORED,
+                        payload={"session": session},
+                        source=self.name,
+                    ))
+            except Exception as e:
+                logger.warning("Failed to restore work session: %s", e)
         logger.info("MemoryPlugin started")
 
     def is_ready(self) -> bool:
@@ -207,6 +233,7 @@ class MemoryPlugin(PluginBase):
             self._command_bus.register_handler("memory.search", self._handle_search)
             self._command_bus.register_handler("memory.stats", self._handle_stats)
             self._command_bus.register_handler("memory.expire", self._handle_expire)
+            self._command_bus.register_handler("memory.continue", self._handle_continue)
 
     def _handle_recall(self, command: Command) -> dict:
         key = command.params.get("key", "").strip()
@@ -311,6 +338,46 @@ class MemoryPlugin(PluginBase):
             return {"message": "Memory system not initialized"}
         count = self._memory.expire_stale()
         return {"message": f"Expired {count} stale record(s)"}
+
+    def _handle_continue(self, command: Command) -> dict:
+        """Reconstruct the last work session, or start/update one.
+
+        M1 Memory UX entry point:
+            memory.continue                  → reconstruct last work session
+            memory.continue summary="<text>" → start a new session (replaces)
+            memory.continue fact="<text>"    → append a fact to the session
+        """
+        if not self._memory:
+            return {"message": "Memory system not initialized"}
+
+        summary = command.params.get("summary", "").strip()
+        fact = command.params.get("fact", "").strip()
+
+        if summary:
+            self._memory.create_session(summary)
+            return {"message": f"New work session started: {summary}"}
+
+        if fact:
+            if self._memory.append_session_fact(fact):
+                return {"message": f"Remembered: {fact}"}
+            self._memory.create_session(fact)
+            return {"message": f"New work session started: {fact}"}
+
+        session = self._memory.get_latest_session()
+        if not session:
+            return {
+                "message": (
+                    "No work session found. Start one by describing your task, "
+                    "e.g.: memory.continue summary=\"C3 cleanup in the Aether repo\""
+                )
+            }
+
+        parts = [f"You were working on {session['summary']}."]
+        facts = session["key_facts"]
+        if facts:
+            parts.append("Remembered: " + "; ".join(facts) + ".")
+        parts.append("Ready to continue.")
+        return {"message": " ".join(parts)}
 
     # ── Event subscriptions ────────────────────────────────────────
 

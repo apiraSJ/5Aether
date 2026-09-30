@@ -25,7 +25,7 @@ from typing import Any, Optional
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QTextBrowser, QTextEdit, QVBoxLayout, QWidget,
+    QPushButton, QTextBrowser, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from aether.ui.panel.panel_widget import PanelWidget
@@ -49,6 +49,13 @@ class AIChatPanelWidget(PanelWidget):
         self._history.setStyleSheet(self._history_style())
         self._history.setOpenExternalLinks(False)
         layout.addWidget(self._history, 1)
+
+        # M1 Memory UX: one click reconstructs the user's last work context.
+        self._continue_btn = QPushButton("Continue My Work")
+        self._continue_btn.setFixedHeight(26)
+        self._continue_btn.setStyleSheet(self._continue_style())
+        self._continue_btn.clicked.connect(self._on_continue_work)
+        layout.addWidget(self._continue_btn)
 
         # Input area
         self._input = QTextEdit()
@@ -130,6 +137,26 @@ class AIChatPanelWidget(PanelWidget):
         if reply:
             self._append_bot(reply)
 
+    def _on_continue_work(self) -> None:
+        """Reconstruct the last work session into the chat (M1 Memory UX).
+
+        Dispatches memory.continue (no params) synchronously via the
+        CommandBus and renders the reconstructed context as a bot message —
+        the user continues work without re-explaining their context.
+        """
+        if self._command_bus is None:
+            self._append_bot("[Continue My Work] command bus not bound.")
+            return
+        from aether.core.command import Command
+        result = self._command_bus.dispatch_sync(Command(
+            name="memory.continue", source="gui", params={},
+        ))
+        response = result.get("message", "") if isinstance(result, dict) else ""
+        if response:
+            self._append_bot(response)
+        else:
+            self._append_bot("[Continue My Work] no work context was recovered.")
+
     # ── Styles ────────────────────────────────────────────────────
 
     @staticmethod
@@ -137,6 +164,15 @@ class AIChatPanelWidget(PanelWidget):
         return (
             "QTextBrowser{background:transparent;border:1px solid rgba(60,65,85,100);"
             "border-radius:4px;color:rgba(200,210,230,200);font-size:9px;padding:6px;}"
+        )
+
+    @staticmethod
+    def _continue_style() -> str:
+        return (
+            "QPushButton{background:rgba(45,55,80,200);border:1px solid "
+            "rgba(96,165,250,140);border-radius:4px;color:rgba(200,210,230,220);"
+            "font-size:9px;}"
+            "QPushButton:hover{background:rgba(60,75,110,220);}"
         )
 
     @staticmethod

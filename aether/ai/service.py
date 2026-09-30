@@ -93,6 +93,9 @@ class AIService:
         self._state = AIState.IDLE
         self._state_lock = threading.RLock()
         self._sessions: Dict[str, List[ChatMessage]] = {}
+        # M1 Memory UX: reconstructed work session injected into the next
+        # chat call so the provider sees what the user was working on.
+        self._session_context: Optional[str] = None
 
     # ── State / provider introspection ──────────────────────────────
 
@@ -117,6 +120,28 @@ class AIService:
 
     def reset_session(self, session_id: str = "default") -> None:
         self._sessions.pop(session_id, None)
+
+    # ── Work session injection (M1 Memory UX) ───────────────────────
+
+    def inject_session_context(self, session: Optional[Dict[str, Any]]) -> None:
+        """Inject the reconstructed work session into the next chat call.
+
+        Called on boot when ``memory.session.restored`` fires. The session
+        text is placed as an extra system message before the user's first
+        message, so the provider sees what the user was working on without
+        the user re-explaining it. A falsy/empty session is a no-op.
+        """
+        if not session:
+            return
+        summary = str(session.get("summary") or "").strip()
+        if not summary:
+            return
+        facts = session.get("key_facts") or []
+        parts = [f"The user was working on: {summary}."]
+        if facts:
+            parts.append("Remembered facts: " + "; ".join(facts) + ".")
+        parts.append("Continue helping without requiring the user to re-explain this context.")
+        self._session_context = " ".join(parts)
 
     # ── Tool integration ───────────────────────────────────────────
 
@@ -201,6 +226,8 @@ class AIService:
             ChatMessage(role=ChatRole.SYSTEM, content=context.system_prompt),
             *context.messages,
         ]
+        if self._session_context:
+            messages.insert(1, ChatMessage(role=ChatRole.SYSTEM, content=self._session_context))
 
         try:
             self._set_state(AIState.RESPONDING)

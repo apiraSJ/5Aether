@@ -195,6 +195,12 @@ class AIPlugin(PluginBase):
 
         self._register_commands()
 
+        # M1 Memory UX: when MemoryPlugin restores the last work session at
+        # boot, inject it into the AI service so the next chat continues the
+        # user's work without them re-explaining context.
+        if self._event_bus is not None:
+            self._event_bus.subscribe("memory.session.restored", self._on_session_restored)
+
         logger.info("AIPlugin initialized (provider=%s, tools=%d, intent=%s, worker=%s)",
                     provider.name, registry.count,
                     intent_reasoner is not None,
@@ -212,6 +218,11 @@ class AIPlugin(PluginBase):
         if self._worker is not None:
             self._worker.stop()
             self._worker = None
+        if self._event_bus is not None:
+            try:
+                self._event_bus.unsubscribe("memory.session.restored", self._on_session_restored)
+            except Exception:
+                pass
         logger.info("AIPlugin stopped")
 
     # ── Config ─────────────────────────────────────────────────────
@@ -279,3 +290,10 @@ class AIPlugin(PluginBase):
         if result.state == AIState.ERROR:
             return {"message": "AI error", "error": "provider_failed"}
         return {"message": result.text}
+
+    def _on_session_restored(self, event) -> None:
+        """Inject the boot-restored work session into the AI service."""
+        payload = event.payload if hasattr(event, "payload") else {}
+        session = payload.get("session")
+        if session and self._service is not None:
+            self._service.inject_session_context(session)

@@ -23,6 +23,11 @@ from aether.memory.sqlite_repository import SQLiteRepository
 
 logger = logging.getLogger("Aether.MemoryManager")
 
+# Well-known key under which the single current work session lives in the
+# "working" table. M1 Memory UX: Aether reconstructs this after the user
+# stops and returns, so work can continue without re-explaining context.
+WORK_SESSION_KEY = "work-session"
+
 
 class MemoryManager:
     """Public API for memory operations.
@@ -389,6 +394,86 @@ class MemoryManager:
         """
         mtype = self._parse_type(memory_type) if memory_type else None
         return self._repository.list_keys(mtype)
+
+    # ── Work session (M1 Memory UX) ────────────────────────────────
+
+    def create_session(
+        self,
+        summary: str,
+        key_facts: Optional[List[str]] = None,
+    ) -> str:
+        """Start (or replace) the current work session.
+
+        A single current-session record is kept under the fixed key
+        ``WORK_SESSION_KEY`` in the ``working`` table, so the latest
+        session always wins. Returns the record ID.
+
+        This is the context Aether reconstructs after the user stops and
+        returns ("Continue my work") without the user re-explaining it.
+        """
+        summary = (summary or "").strip()
+        if not summary:
+            raise ValueError("Work session summary is required")
+
+        self._repository.forget(WORK_SESSION_KEY, MemoryType.WORKING)
+        record_id = self._repository.store(
+            memory_type=MemoryType.WORKING,
+            key=WORK_SESSION_KEY,
+            value={
+                "type": "work_session",
+                "summary": summary,
+                "key_facts": list(key_facts or []),
+            },
+        )
+        self._emit("memory.session.created", {
+            "id": record_id,
+            "summary": summary,
+            "key_facts": list(key_facts or []),
+        })
+        return record_id
+
+    def append_session_fact(self, fact: str) -> bool:
+        """Append a key fact to the current work session.
+
+        Returns True if a session existed and was updated; False if there
+        is no current session or the fact is empty.
+        """
+        fact = (fact or "").strip()
+        if not fact:
+            return False
+        record = self._latest_session_record()
+        if record is None:
+            return False
+        value = dict(record.value) if isinstance(record.value, dict) else {}
+        value.setdefault("type", "work_session")
+        facts = list(value.get("key_facts") or [])
+        if fact not in facts:
+            facts.append(fact)
+        value["key_facts"] = facts
+        return self._repository.update(record.id, value=value)
+
+    def get_latest_session(self) -> Optional[Dict[str, Any]]:
+        """Return the current work session as a plain dict, or None.
+
+        The dict is UI/AI-safe (no storage internals):
+            {"id", "summary", "key_facts", "updated_at"}
+        """
+        record = self._latest_session_record()
+        if record is None:
+            return None
+        value = record.value if isinstance(record.value, dict) else {}
+        return {
+            "id": record.id,
+            "summary": str(value.get("summary", "")),
+            "key_facts": list(value.get("key_facts") or []),
+            "updated_at": record.updated_at,
+        }
+
+    def _latest_session_record(self) -> Optional[MemoryRecord]:
+        result = self._repository.recall(WORK_SESSION_KEY, MemoryType.WORKING)
+        if not result.found or not result.records:
+            return None
+        return result.records[0]
 
     # ── Internal ───────────────────────────────────────────────────
 
