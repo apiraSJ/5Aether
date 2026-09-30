@@ -48,7 +48,7 @@ examples:
   python -m aether --mode tick        30Hz tick loop with plugins
   python -m aether --mode headless    same as default (no tick loop)
   python -m aether --mode vision      camera + hand tracking + object detection
-  python -m aether --config config/desktop.yaml
+  python -m aether --config config/archive/desktop.yaml
   python -m aether --strict-plugins"""
     )
     parser.add_argument(
