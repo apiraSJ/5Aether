@@ -29,8 +29,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("Aether.WorkspaceManager")
 
-WORKSPACES_DIR = Path(__file__).resolve().parent.parent / "config" / "workspaces"
-LAYOUTS_DIR = Path(__file__).resolve().parent.parent / "data" / "layouts"
+WORKSPACES_DIR = Path(__file__).resolve().parent.parent.parent / "config" / "workspaces"
+LAYOUTS_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "layouts"
 
 
 class WorkspaceManager:

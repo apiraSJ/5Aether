@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("Aether.ThemeManager")
 
-DEFAULT_THEMES_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "themes"
+DEFAULT_THEMES_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data" / "themes"
 
 # Default theme used when no theme is loaded
 DEFAULT_THEME: Dict[str, Any] = {

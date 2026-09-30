@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("Aether.LayoutManager")
 
-DEFAULT_LAYOUTS_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "layouts"
+DEFAULT_LAYOUTS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data" / "layouts"
 
 
 class LayoutManager:
