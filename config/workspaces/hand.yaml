@@ -1,0 +1,33 @@
+# Hand Workspace — default workspace for Sprint 1
+# Workspace = what panels exist
+# Layout    = where panels are positioned (separate file)
+name: "hand"
+label: "Hand Workspace"
+description: "Default hand-interactive workspace with camera, memory, and placeholders"
+default_layout: "hand_default"
+panels:
+  - id: "camera_panel"
+    type: "camera"
+    visible: true
+    z_index: 0
+  - id: "memory"
+    type: "memory"
+    visible: true
+    z_index: 10
+  - id: "ai_chat"
+    type: "placeholder"
+    label: "AI Chat"
+    visible: true
+    z_index: 10
+  - id: "tasks"
+    type: "placeholder"
+    label: "Tasks"
+    visible: true
+    z_index: 10
+  - id: "dashboard"
+    type: "placeholder"
+    label: "Dashboard"
+    visible: true
+    z_index: 10
+startup_commands:
+  - "interaction.cursor.enable"

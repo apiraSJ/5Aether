@@ -1,0 +1,29 @@
+# Memory Configuration for Aether Memory Core
+# Controls retention, storage paths, and event subscriptions.
+
+memory:
+  # Database path (relative to project root)
+  db_path: "data/memory.db"
+
+  # Retention policies per memory type
+  retention:
+    working:
+      ttl_seconds: 300          # 5 minutes
+    semantic:
+      ttl_seconds: null         # Infinite (never expire)
+    episodic:
+      ttl_seconds: 31536000     # 365 days
+    spatial:
+      stale_after: 2592000      # 30 days before marking stale
+      delete_after: null        # Never auto-delete
+
+  # Auto-store detected objects from vision pipeline
+  auto_store_vision:
+    enabled: true
+    ttl_seconds: 3600           # 1 hour for vision detections
+    min_confidence: 0.3
+
+  # Event subscriptions
+  events:
+    subscribe_vision_objects: true
+    subscribe_hand_gestures: false  # Future: store gesture patterns

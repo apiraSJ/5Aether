@@ -1,0 +1,105 @@
+# Gesture Configuration for Aether Hand Input
+# Maps gestures to commands via the unified InputRouter pipeline.
+# Gesture → HandController → InputRouter → InteractionController → CommandBus/EventBus
+#
+# All gestures route through the same pipeline as mouse/voice input.
+# No direct gesture-to-action mapping — everything goes through CommandBus.
+#
+# Configurable per-gesture:
+#   command:    CommandBus command to execute
+#   enabled:    Whether this gesture is active
+#   cooldown:   Minimum ms between activations (prevents spam)
+#   confidence: Minimum confidence threshold (0.0–1.0)
+#   params:     Optional parameters to pass to the command
+
+gestures:
+  # ── Cursor Control ──────────────────────────────────────────────────────
+  open_palm:
+    command: "interaction.cursor.enable"
+    enabled: true
+    cooldown: 500
+    confidence: 0.7
+    description: "Open palm enables cursor tracking"
+
+  fist:
+    command: "interaction.mode.reset"
+    enabled: true
+    cooldown: 500
+    confidence: 0.7
+    description: "Fist cancels current interaction"
+
+  # ── Click / Select ──────────────────────────────────────────────────────
+  pinch:
+    command: "interaction.cursor.click"
+    enabled: true
+    cooldown: 300
+    confidence: 0.8
+    description: "Pinch triggers click at cursor position"
+
+  thumb_up:
+    command: "panel.focus"
+    enabled: true
+    cooldown: 500
+    confidence: 0.7
+    description: "Thumb up focuses the selected panel"
+
+  # ── Navigation ──────────────────────────────────────────────────────────
+  swipe_left:
+    command: "workspace.switch_left"
+    enabled: true
+    cooldown: 800
+    confidence: 0.6
+    description: "Swipe left switches to previous workspace"
+
+  swipe_right:
+    command: "workspace.switch_right"
+    enabled: true
+    cooldown: 800
+    confidence: 0.6
+    description: "Swipe right switches to next workspace"
+
+  swipe_up:
+    command: "panel.show"
+    enabled: true
+    cooldown: 800
+    confidence: 0.6
+    description: "Swipe up shows a hidden panel"
+
+  swipe_down:
+    command: "panel.hide"
+    enabled: true
+    cooldown: 800
+    confidence: 0.6
+    description: "Swipe down hides a panel"
+
+  # ── Mode Switching ──────────────────────────────────────────────────────
+  peace:
+    command: "interaction.mode.cursor"
+    enabled: true
+    cooldown: 1000
+    confidence: 0.7
+    description: "Peace sign activates cursor mode"
+
+  point_up:
+    command: "interaction.mode.panel"
+    enabled: true
+    cooldown: 1000
+    confidence: 0.7
+    description: "Point up activates panel selection mode"
+
+# ── Global Settings ───────────────────────────────────────────────────────
+settings:
+  # Minimum confidence across all gestures
+  global_confidence_threshold: 0.5
+
+  # Maximum simultaneous gesture recognitions
+  max_gestures: 1
+
+  # Hand tracking update rate (ms) — affects cursor smoothness
+  update_interval_ms: 16
+
+  # Enable/disable hand input entirely
+  enabled: true
+
+  # Hand preference: "left", "right", or "both"
+  preferred_hand: "right"
