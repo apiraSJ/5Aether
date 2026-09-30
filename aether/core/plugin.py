@@ -57,6 +57,14 @@ class PluginBase(ABC):
         """
         raise NotImplementedError
 
+    def start(self) -> None:
+        """Called once after all plugins initialized. Open connections, start threads."""
+        pass
+
+    def stop(self) -> None:
+        """Called once before shutdown. Close connections, stop threads."""
+        pass
+
     def shutdown(self) -> None:
         """Release resources: threads, handles, model instances, file descriptors."""
         pass

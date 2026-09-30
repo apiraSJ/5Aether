@@ -191,6 +191,10 @@ class VisionAdapterPlugin(PluginBase):
         ms = (time.perf_counter() - t0) * 1000.0
         profiler._record_stage("vision_adapter", ms)
 
+    def is_ready(self) -> bool:
+        """True when the perception worker is running with a state adapter."""
+        return self._running and self._adapter is not None
+
     def shutdown(self):
         self._running = False
         if self._thread:

@@ -127,6 +127,10 @@ class CameraPlugin(PluginBase):
             logger.error("CameraPlugin: failed to open camera: %s", e)
             return None
 
+    def is_ready(self) -> bool:
+        """True when a camera is open and the capture thread is running."""
+        return self._cap is not None and self._running
+
     def shutdown(self) -> None:
         """Stop camera capture and release resources."""
         self._running = False

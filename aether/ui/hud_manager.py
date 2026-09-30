@@ -52,12 +52,14 @@ class Widget(Protocol):
 # Layer 0 (camera): every frame (0 = no throttle)
 # Layer 1 (overlay): every frame
 # Layer 2 (status/gesture/object list): every 0.1s = 10 Hz
-# Layer 3 (timeline/perf_hud): every 0.2s = 5 Hz
+# Layer 3 (timeline): every 0.2s = 5 Hz
+# Layer 4 (perf_hud): every 0.2s = 5 Hz
 DEFAULT_LAYER_INTERVALS = {
     0: 0.0,     # camera — every frame
     1: 0.0,     # overlay — every frame
     2: 0.1,     # status/gesture/objects — 10 Hz
-    3: 0.2,     # timeline/perf_hud — 5 Hz
+    3: 0.2,     # timeline — 5 Hz
+    4: 0.2,     # perf_hud — 5 Hz
 }
 
 
@@ -141,6 +143,12 @@ class HUDManager:
                 if hasattr(widget, 'is_visible') and not widget.is_visible():
                     continue
 
+                # Only update widgets that implement the HUD update protocol.
+                # Plain QWidgets (e.g. WorkspaceScene) repaint via Qt's own
+                # paintEvent and must not be driven here.
+                if not hasattr(widget, 'update'):
+                    continue
+
                 try:
                     widget.update()
                 except Exception:
@@ -162,7 +170,7 @@ class HUDManager:
 
         if widget is not None:
             # Single widget paint (for dirty region)
-            if widget.is_visible():
+            if hasattr(widget, 'is_visible') and widget.is_visible() and hasattr(widget, 'paint'):
                 try:
                     widget.paint()
                 except Exception:
@@ -172,6 +180,10 @@ class HUDManager:
             for layer in self._layer_order:
                 for widget in self._layers.get(layer, []):
                     if hasattr(widget, 'is_visible') and not widget.is_visible():
+                        continue
+                    # Only paint widgets that implement the HUD paint protocol.
+                    # Plain QWidgets repaint via Qt's own paintEvent.
+                    if not hasattr(widget, 'paint'):
                         continue
                     try:
                         widget.paint()

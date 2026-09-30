@@ -105,7 +105,8 @@ class AdaptiveScheduler:
                 0: 0.0,      # camera - every frame
                 1: 0.0,      # overlay - every frame
                 2: 0.1,      # status/gesture/objects - 10 Hz
-                3: 0.2,      # timeline/perf_hud - 5 Hz
+                3: 0.2,      # timeline - 5 Hz
+                4: 0.2,      # perf_hud - 5 Hz
             },
             skip_yolo=False,
             skip_mediapipe=False,
@@ -248,6 +249,7 @@ class AdaptiveScheduler:
             1: 0.0 if pressure < 0.7 else 1.0 / 30.0,  # Overlay - full or 30Hz
             2: 0.1 if pressure < 0.5 else (0.2 if pressure < 0.8 else 0.5),  # 10/5/2 Hz
             3: 0.2 if pressure < 0.5 else (0.5 if pressure < 0.8 else 1.0),  # 5/2/1 Hz
+            4: 0.2 if pressure < 0.5 else (0.5 if pressure < 0.8 else 1.0),  # perf_hud 5/2/1 Hz
         }
 
         return SchedulerState(

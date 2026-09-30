@@ -51,6 +51,8 @@ class StageMetrics:
     last_ms: float = 0.0
     _window_ms: float = 0.0
     _window_count: int = 0
+    _last_window_avg: float = 0.0
+    _last_window_count: int = 0
     _history: list[float] = field(default_factory=list)
 
     def record(self, ms: float) -> None:
@@ -72,12 +74,12 @@ class StageMetrics:
     def window_count(self) -> int:
         return self._window_count
 
-    def reset_window(self) -> tuple[float, int]:
-        avg = self.window_avg()
-        cnt = self._window_count
+    def roll_window(self) -> None:
+        """Close the current window, storing its result as last-completed."""
+        self._last_window_avg = self.window_avg()
+        self._last_window_count = self._window_count
         self._window_ms = 0.0
         self._window_count = 0
-        return avg, cnt
 
     def percentile(self, p: float) -> float:
         """Compute percentile from history."""
@@ -114,6 +116,10 @@ class ProfilerSnapshot:
     tick_overrun_ms: float
     tick_fps: float
     render_ms: float
+    repaints_per_sec: float = 0.0
+    total_repaints: int = 0
+    events_per_sec: float = 0.0
+    qt_events_ms: float = 0.0
 
 
 @dataclass
@@ -148,6 +154,15 @@ class Profiler:
         self._tick_count: int = 0
         self._tick_window_start: float = time.perf_counter()
         self._tick_fps: float = 0.0
+
+        # 1-second window rolling (stages + repaint counter)
+        self._window_roll_start: float = time.perf_counter()
+        self._repaint_count: int = 0
+        self._repaint_window: int = 0
+        self._last_repaint_window: int = 0
+        self._qt_events_ms: float = 0.0
+        self._qt_events_window_ms: float = 0.0
+        self._qt_events_window_count: int = 0
 
         # Recording mode
         self._recording: bool = False
@@ -305,6 +320,21 @@ class Profiler:
         """Record time spent in a plugin's update() call."""
         self._record_stage(f"plugin.{name}", ms)
 
+    # ── Repaint / Qt event loop ────────────────────────────────────
+
+    def record_repaint(self) -> None:
+        """Count one widget repaint (called from a Qt paint event filter)."""
+        with self._lock:
+            self._repaint_count += 1
+            self._repaint_window += 1
+
+    def record_event_loop(self, ms: float) -> None:
+        """Record time spent in QApplication.processEvents() during a tick."""
+        with self._lock:
+            self._qt_events_ms = ms
+            self._qt_events_window_ms += ms
+            self._qt_events_window_count += 1
+
     # ── Queue metrics ──────────────────────────────────────────────
 
     def set_queue(self, name: str, **kwargs) -> None:
@@ -320,14 +350,46 @@ class Profiler:
 
     # ── Snapshot (live HUD) ────────────────────────────────────────
 
+    def _roll_windows(self) -> None:
+        """Close the current 1-second window for all stages + repaint counter.
+
+        Caller must hold the lock.
+        """
+        for stage in self._stages.values():
+            stage.roll_window()
+        self._last_repaint_window = self._repaint_window
+        self._repaint_window = 0
+        self._window_roll_start = time.perf_counter()
+
+    def reset_windows(self) -> None:
+        """Force-close the current window now (e.g. once per second logging)."""
+        with self._lock:
+            self._roll_windows()
+
     def snapshot(self) -> ProfilerSnapshot:
+        """Read-only point-in-time snapshot.
+
+        Non-destructive: does NOT reset measurement windows. Windows roll
+        automatically on a 1-second cadence, so repeated calls at any rate
+        return stable 1-second averages instead of corrupted partial windows.
+        """
         now = time.perf_counter()
         stages = {}
         queues = {}
 
         with self._lock:
+            if now - self._window_roll_start >= 1.0:
+                self._roll_windows()
+
             for name, stage in self._stages.items():
-                avg, cnt = stage.reset_window()
+                # Prefer the last completed 1-second window; fall back to the
+                # current partial window before the first roll completes.
+                if stage._last_window_count > 0:
+                    avg = stage._last_window_avg
+                    cnt = stage._last_window_count
+                else:
+                    avg = stage.window_avg()
+                    cnt = stage._window_count
                 stages[name] = {
                     "avg_ms": round(avg, 1),
                     "last_ms": round(stage.last_ms, 1),
@@ -354,13 +416,30 @@ class Profiler:
             tick_fps = self._tick_fps
             render_ms = stages.get("render", {}).get("avg_ms", 0.0)
 
+            repaints = (
+                self._last_repaint_window if self._last_repaint_window > 0
+                else self._repaint_window
+            )
+            total_repaints = self._repaint_count
+            events_per_sec = queues.get("eventbus", {}).get("events_per_sec", 0.0)
+            qt_events_ms = self._qt_events_window_avg()
+
         return ProfilerSnapshot(
             timestamp=now, stages=stages, queues=queues,
             e2e_latency_ms=round(e2e, 1), frame_age_ms=round(frame_age, 1),
             tick_budget_ms=round(tick_budget, 1), tick_used_ms=round(tick_used, 1),
             tick_overrun_ms=round(tick_overrun, 1), tick_fps=round(tick_fps, 1),
             render_ms=round(render_ms, 1),
+            repaints_per_sec=float(repaints),
+            total_repaints=total_repaints,
+            events_per_sec=events_per_sec,
+            qt_events_ms=round(qt_events_ms, 2),
         )
+
+    def _qt_events_window_avg(self) -> float:
+        if self._qt_events_window_count == 0:
+            return 0.0
+        return self._qt_events_window_ms / self._qt_events_window_count
 
     # ── Report (full session) ──────────────────────────────────────
 
@@ -578,6 +657,8 @@ class Profiler:
         lines.append("-" * 52)
         lines.append(f"  End2End Latency : {snap.e2e_latency_ms:>6.1f} ms")
         lines.append(f"  Frame Age       : {snap.frame_age_ms:>6.1f} ms")
+        lines.append(f"  Repaints        : {snap.repaints_per_sec:>6.0f} /s  "
+                      f"Qt Events {snap.qt_events_ms:>5.2f} ms")
         lines.append("")
         for name in ["frame_broker", "eventbus"]:
             if name in snap.queues:

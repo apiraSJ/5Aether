@@ -30,6 +30,7 @@ from aether.ai.providers import create_provider
 from aether.ai.service import AIService
 from aether.ai.tools import ToolExecutor, ToolRegistry
 from aether.config.loader import ConfigLoader
+from aether.core.ai_worker import AIWorker
 from aether.core.command import Command
 from aether.core.command_registry import CommandInfo, CommandRegistry
 from aether.core.plugin import PluginBase, PluginMetadata
@@ -78,6 +79,7 @@ class AIPlugin(PluginBase):
         self._event_bus = None
         self._command_bus = None
         self._service: Optional[AIService] = None
+        self._worker: Optional[AIWorker] = None
         self._ai_config: Optional[ConfigLoader] = None
         self._ai_config_path: str = _AI_CONFIG_PATH
 
@@ -85,6 +87,11 @@ class AIPlugin(PluginBase):
     def ai_service(self) -> Optional[AIService]:
         """The functional AIService (UI facade)."""
         return self._service
+
+    @property
+    def worker(self) -> Optional[AIWorker]:
+        """The background AI worker (Phase B1 async tick loop)."""
+        return self._worker
 
     @property
     def metadata(self) -> PluginMetadata:
@@ -179,10 +186,19 @@ class AIPlugin(PluginBase):
         )
         container.register_instance("ai_service", self._service)
 
+        # Phase B1: background AI worker so ai.chat never blocks the 30 Hz
+        # tick. submit() enqueues; AIService.chat runs on the worker thread
+        # and results arrive via queued ai.* events on the main-thread flush.
+        self._worker = AIWorker(self._service.chat, name="aether-ai-worker")
+        self._worker.start()
+        container.register_instance("ai_worker", self._worker)
+
         self._register_commands()
-        logger.info("AIPlugin initialized (provider=%s, tools=%d, intent=%s)",
+
+        logger.info("AIPlugin initialized (provider=%s, tools=%d, intent=%s, worker=%s)",
                     provider.name, registry.count,
-                    intent_reasoner is not None)
+                    intent_reasoner is not None,
+                    self._worker.running)
 
     def start(self) -> None:
         logger.info("AIPlugin started (provider=%s available=%s)",
@@ -193,6 +209,9 @@ class AIPlugin(PluginBase):
         return self._service is not None
 
     def stop(self) -> None:
+        if self._worker is not None:
+            self._worker.stop()
+            self._worker = None
         logger.info("AIPlugin stopped")
 
     # ── Config ─────────────────────────────────────────────────────

@@ -82,6 +82,54 @@ class GestureInfo:
 
 
 @dataclass
+@dataclass
+class InteractionStatus:
+    """Overall interaction state for HUD display."""
+    state: str = "IDLE"
+    cursor_mode: str = "TRACKING"
+    target_panel: str = ""
+    action: str = ""
+
+
+@dataclass
+class SnapIndicator:
+    """Snap zone indicator to render during drag."""
+    active: bool = False
+    snap_type: str = "none"
+    x: int = 0
+    y: int = 0
+    w: int = 0
+    h: int = 0
+    opacity: float = 0.3
+
+
+@dataclass
+class FocusRing:
+    """Focus ring visual parameters."""
+    active: bool = False
+    x: int = 0
+    y: int = 0
+    w: int = 0
+    h: int = 0
+    color: str = "96, 165, 250"
+    width: int = 3
+    glow_width: int = 8
+    rounded: int = 8
+
+
+@dataclass
+class AnimatedPanelState:
+    """Smoothly interpolated panel geometry for rendering."""
+    panel_id: str = ""
+    x: float = 0.0
+    y: float = 0.0
+    w: float = 0.0
+    h: float = 0.0
+    opacity: float = 1.0
+    visible: bool = True
+
+
+@dataclass
 class SceneInfo:
     """Overall scene state."""
     object_count: int = 0
@@ -104,9 +152,13 @@ class OverlayModel:
         self._hands: list[DetectedHand] = []
         self._cursor: CursorPosition = CursorPosition()
         self._gesture: GestureInfo = GestureInfo()
+        self._interaction_status: InteractionStatus = InteractionStatus()
         self._scene: SceneInfo = SceneInfo()
         self._notifications: list[tuple[str, float]] = []  # (text, timestamp)
         self._event_history: deque[dict] = deque(maxlen=200)  # (timestamp, source, type)
+        self._snap_indicator: SnapIndicator = SnapIndicator()
+        self._focus_ring: FocusRing = FocusRing()
+        self._animated_panels: dict[str, AnimatedPanelState] = {}
         self._dirty: bool = True
 
     @property
@@ -227,6 +279,18 @@ class OverlayModel:
     def gesture(self) -> GestureInfo:
         return self._gesture
 
+    # ── Interaction Status ───────────────────────────────────────────
+
+    def update_interaction_status(self, status: InteractionStatus) -> None:
+        """Update overall interaction status for HUD display."""
+        self._interaction_status = status
+        self._dirty = True
+
+    @property
+    def interaction_status(self) -> InteractionStatus:
+        """Get current interaction status."""
+        return self._interaction_status
+
     # ── Scene ───────────────────────────────────────────────────────
 
     def update_scene(self, **kwargs) -> None:
@@ -261,6 +325,63 @@ class OverlayModel:
         self._notifications = [(t, exp) for t, exp in self._notifications if exp > now]
         return [t for t, _ in self._notifications]
 
+    # ── Snap Indicator ────────────────────────────────────────────
+
+    def update_snap_indicator(
+        self,
+        active: bool = False,
+        snap_type: str = "none",
+        x: int = 0, y: int = 0, w: int = 0, h: int = 0,
+    ) -> None:
+        self._snap_indicator = SnapIndicator(
+            active=active, snap_type=snap_type,
+            x=x, y=y, w=w, h=h,
+        )
+        self._dirty = True
+
+    def clear_snap_indicator(self) -> None:
+        self._snap_indicator = SnapIndicator()
+        self._dirty = True
+
+    @property
+    def snap_indicator(self) -> SnapIndicator:
+        return self._snap_indicator
+
+    # ── Focus Ring ────────────────────────────────────────────────
+
+    def update_focus_ring(
+        self,
+        active: bool = False,
+        x: int = 0, y: int = 0, w: int = 0, h: int = 0,
+        color: str = "96, 165, 250",
+    ) -> None:
+        self._focus_ring = FocusRing(
+            active=active, x=x, y=y, w=w, h=h, color=color,
+        )
+        self._dirty = True
+
+    def clear_focus_ring(self) -> None:
+        self._focus_ring = FocusRing()
+        self._dirty = True
+
+    @property
+    def focus_ring(self) -> FocusRing:
+        return self._focus_ring
+
+    # ── Animated Panels ───────────────────────────────────────────
+
+    def update_animated_panels(self, panels: dict[str, AnimatedPanelState]) -> None:
+        self._animated_panels = dict(panels)
+        self._dirty = True
+
+    def clear_animated_panels(self) -> None:
+        self._animated_panels.clear()
+        self._dirty = True
+
+    @property
+    def animated_panels(self) -> dict[str, AnimatedPanelState]:
+        return dict(self._animated_panels)
+
     # ── Reset ───────────────────────────────────────────────────────
 
     def clear(self) -> None:
@@ -268,7 +389,11 @@ class OverlayModel:
         self._hands.clear()
         self._cursor = CursorPosition()
         self._gesture = GestureInfo()
+        self._interaction_status = InteractionStatus()
         self._scene = SceneInfo()
         self._notifications.clear()
         self._event_history.clear()
+        self._snap_indicator = SnapIndicator()
+        self._focus_ring = FocusRing()
+        self._animated_panels.clear()
         self._dirty = True

@@ -208,7 +208,7 @@ class OverlayWidget(QWidget):
 
     # ── Paint ────────────────────────────────────────────────────────
 
-    def paintEvent(self, event) -> None:
+    def     paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
@@ -222,6 +222,8 @@ class OverlayWidget(QWidget):
 
         self._draw_objects(painter)
         self._draw_hands(painter, w, h)
+        self._draw_snap_indicator(painter, w, h)
+        self._draw_focus_ring(painter)
         self._draw_cursor(painter, w, h)
         self._draw_gesture(painter, w, h)
         self._draw_notifications(painter, w, h)
@@ -329,13 +331,73 @@ class OverlayWidget(QWidget):
                 continue
             painter.drawPath(cache.path)
 
-    def _draw_cursor(self, painter: QPainter, w: int, h: int) -> None:
-        cursor = self._model.cursor
-        if not cursor.visible:
+
+    def _draw_snap_indicator(self, painter: QPainter, w: int, h: int) -> None:
+        snap = self._model.snap_indicator
+        if not snap.active:
             return
 
-        cx = int(cursor.x * w)
-        cy = int(cursor.y * h)
+        alpha = min(255, int(snap.opacity * 255))
+        color = QColor(96, 165, 250, alpha)
+        painter.setPen(QPen(color, 2.0, Qt.DashLine))
+        painter.setBrush(QBrush(QColor(96, 165, 250, alpha // 3)))
+        painter.drawRoundedRect(snap.x, snap.y, snap.w, snap.h, 8, 8)
+
+        # Label for dock type
+        label = snap.snap_type.replace("dock_", "").replace("_", " ").title()
+        painter.setFont(FONT_LABEL)
+        painter.setPen(color)
+        painter.drawText(snap.x + 8, snap.y + 20, label)
+
+    def _draw_focus_ring(self, painter: QPainter) -> None:
+        ring = self._model.focus_ring
+        if not ring.active:
+            return
+
+        r = ring.x + ring.w
+        b = ring.y + ring.h
+
+        # Outer glow
+        glow_color = QColor(96, 165, 250, 40)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(glow_color))
+        painter.drawRoundedRect(
+            ring.x - ring.glow_width, ring.y - ring.glow_width,
+            ring.w + ring.glow_width * 2, ring.h + ring.glow_width * 2,
+            ring.rounded + 4, ring.rounded + 4,
+        )
+
+        # Focus border
+        border_color = QColor(96, 165, 250, 220)
+        painter.setPen(QPen(border_color, ring.width))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRoundedRect(ring.x, ring.y, ring.w, ring.h, ring.rounded, ring.rounded)
+
+        # Corner accents
+        cl = min(16, (ring.w) // 8, (ring.h) // 8)
+        accent = QColor(255, 255, 255, 200)
+        painter.setPen(QPen(accent, 2.0))
+        painter.setBrush(Qt.NoBrush)
+        # Top-left
+        painter.drawLine(ring.x, ring.y + cl, ring.x, ring.y)
+        painter.drawLine(ring.x, ring.y, ring.x + cl, ring.y)
+        # Top-right
+        painter.drawLine(r, ring.y + cl, r, ring.y)
+        painter.drawLine(r - cl, ring.y, r, ring.y)
+        # Bottom-left
+        painter.drawLine(ring.x, b - cl, ring.x, b)
+        painter.drawLine(ring.x, b, ring.x + cl, b)
+        # Bottom-right
+        painter.drawLine(r, b - cl, r, b)
+        painter.drawLine(r - cl, b, r, b)
+
+    def _draw_cursor(self, painter: QPainter, w: int, h: int) -> None:
+        cursor = self._model.cursor
+        if cursor.visible:
+            cx = int(cursor.x * w)
+            cy = int(cursor.y * h)
+        else:
+            cx, cy = w // 2, h // 2
 
         if cursor.state == CursorState.DEFAULT:
             path = self._cursor_paths.get("default")
@@ -368,6 +430,31 @@ class OverlayWidget(QWidget):
                 painter.setPen(Qt.NoPen)
                 painter.setBrush(QBrush(ACCENT))
                 painter.drawPath(p)
+
+        elif cursor.state == CursorState.DRAGGING:
+            # Large accent circle for dragging
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(QColor(96, 165, 250, 180)))
+            painter.drawEllipse(cx - 16, cy - 16, 32, 32)
+            # Inner white dot
+            painter.setBrush(QBrush(WHITE))
+            painter.drawEllipse(cx - 4, cy - 4, 8, 8)
+
+        elif cursor.state == CursorState.DRAG_START:
+            # Indented dot for drag start
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(WHITE))
+            painter.drawEllipse(cx - 10, cy - 10, 20, 20)
+            painter.setBrush(QBrush(ACCENT))
+            painter.drawEllipse(cx - 3, cy - 3, 6, 6)
+
+        elif cursor.state == CursorState.DRAG_END:
+            # Large circle with glow for drag end
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(QColor(96, 165, 250, 60)))
+            painter.drawEllipse(cx - 24, cy - 24, 48, 48)
+            painter.setBrush(QBrush(ACCENT))
+            painter.drawEllipse(cx - 12, cy - 12, 24, 24)
 
     def _draw_gesture(self, painter: QPainter, w: int, h: int) -> None:
         gesture = self._model.gesture

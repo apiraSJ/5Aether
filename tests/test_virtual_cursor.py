@@ -1,10 +1,17 @@
 """Test virtual cursor service and widget."""
 
+import os
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication
 
 from aether.core.virtual_cursor import VirtualCursor, CursorState
 from aether.ui.cursor_widget import CursorWidget
+from aether.ui.overlay_model import OverlayModel
 from aether.core.service_container import ServiceContainer
+
+app = QApplication.instance() or QApplication([])
 
 
 class MockEventBus:
@@ -85,9 +92,8 @@ def test_virtual_cursor_drag_end():
 
 def test_cursor_widget_initialization():
     """Test CursorWidget initialization."""
-    container = ServiceContainer()
-
-    widget = CursorWidget(container)
+    model = OverlayModel()
+    widget = CursorWidget(model)
 
     assert widget._cursor_x == 0.5
     assert widget._cursor_y == 0.5
@@ -97,10 +103,12 @@ def test_cursor_widget_initialization():
 
 def test_cursor_widget_set_state():
     """Test CursorWidget state updates."""
-    container = ServiceContainer()
-    widget = CursorWidget(container)
+    model = OverlayModel()
+    widget = CursorWidget(model)
 
-    widget.set_cursor_state("drag_start", (0.3, 0.7))
+    model.update_cursor(0.3, 0.7, state=model.cursor.state.__class__.DRAG_START)
+    model._cursor.selection_glow = False
+    widget.update()
 
     assert widget._cursor_state == "drag_start"
     assert widget._cursor_x == 0.3
@@ -110,11 +118,11 @@ def test_cursor_widget_set_state():
 
 def test_cursor_widget_mouse_events():
     """Test that widget ignores mouse events."""
-    container = ServiceContainer()
-    widget = CursorWidget(container)
+    model = OverlayModel()
+    widget = CursorWidget(model)
 
     # Widget should have transparent mouse events
-    assert widget.attribute(Qt.WA_TransparentForMouseEvents) is True
+    assert widget.testAttribute(Qt.WA_TransparentForMouseEvents) is True
     print("✓ CursorWidget mouse event transparency test passed")
 
 

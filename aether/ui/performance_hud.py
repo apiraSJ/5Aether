@@ -201,7 +201,21 @@ class PerformanceHUD(QWidget):
 
         self._lines.append(("", WHITE, ""))
 
-        # ── Queue Metrics ──────────────────────────────────────
+        # ── Qt / Repaint Metrics ──────────────────────────────────
+        self._lines.append((
+            "  Qt Events",
+            _color_for_ms(snap.qt_events_ms),
+            f"{snap.qt_events_ms:.2f} ms",
+        ))
+        self._lines.append((
+            "  Repaints",
+            _color_for_hz(snap.repaints_per_sec, 30),
+            f"{snap.repaints_per_sec:.0f}/s",
+        ))
+
+        self._lines.append(("", WHITE, ""))
+
+        # ── Queue Metrics ─────────────────────────────────────────
         if "frame_broker" in snap.queues:
             q = snap.queues["frame_broker"]
             overwritten = q.get("overwritten", 0)
@@ -215,10 +229,17 @@ class PerformanceHUD(QWidget):
             q = snap.queues["eventbus"]
             queued = q.get("queued", 0)
             oldest = q.get("oldest_ms", 0)
+            delivered = q.get("delivered_per_sec", 0)
+            orphans = q.get("orphans_per_sec", 0)
             self._lines.append((
                 "  EventBus",
                 GRAY,
                 f"q={queued} oldest={oldest:.0f}ms",
+            ))
+            self._lines.append((
+                "  Events",
+                GRAY,
+                f"{delivered:.0f}/s orph={orphans:.0f}/s",
             ))
 
         super().update()

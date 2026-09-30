@@ -28,6 +28,7 @@ from aether.core.profiler import profiler
 from aether.core.adaptive_scheduler import adaptive_scheduler
 from aether.core.service_container import ServiceContainer
 from aether.core.service import IService
+from aether.core.boot_profiler import boot_profiler
 
 logger = logging.getLogger("Aether.Application")
 
@@ -99,16 +100,20 @@ class AetherApplication:
         # UI-0: --background flag forces hidden, overrides gui.start_visible.
         if self._background:
             self.config.set("gui.start_visible", False)
+
         self._configure_logging()
         self._log_boot_banner()
+        boot_profiler.mark("config_loaded")
 
         # 3. DI Container
         self.container = ServiceContainer()
+        boot_profiler.mark("container_created")
 
         # 4. Core infrastructure
         self.event_bus = EventBus(queued=True)  # Phase B: queued mode
         self.result_pipeline = ResultPipeline(self.event_bus)
         self.command_bus = CommandBus(result_pipeline=self.result_pipeline, container=self.container, event_bus=self.event_bus)
+        boot_profiler.mark("core_infrastructure")
 
         # Register core infrastructure into DI container
         self.container.register_instance("config", self.config)
@@ -116,6 +121,9 @@ class AetherApplication:
         self.container.register_instance("result_pipeline", self.result_pipeline)
         self.container.register_instance("command_bus", self.command_bus)
         self.container.register_instance("application", self)
+
+        # Register BootProfiler for --profile-boot flag
+        self.container.register_instance("boot_profiler", boot_profiler)
 
         # Register AdaptiveScheduler for vision/render scheduling
         from aether.core.adaptive_scheduler import adaptive_scheduler
@@ -127,10 +135,14 @@ class AetherApplication:
 
         # 5. Plugin system
         self.plugin_loader = PluginLoader(self.container, strict_mode=self.strict_plugins)
+        self.container.register_instance("plugin_loader", self.plugin_loader)
 
         plugin_specs = self.config.get("plugins", [])
         plugins = self.plugin_loader.load_from_config(plugin_specs)
+        boot_profiler.mark("plugins_loaded")
+
         self.plugin_loader.initialize_all(plugins)
+        boot_profiler.mark("plugins_initialized")
 
         # 6. Discover and start services (plugins register them during initialize)
         self._discover_services()
@@ -145,11 +157,14 @@ class AetherApplication:
                 if self.strict_plugins:
                     raise
 
-        # 8. Start tickable plugins (input capture threads, etc.)
-        self._start_tickable_plugins()
+        # 8. Start all plugins (includes tickable and non-tickable)
+        self._start_all_plugins()
+        boot_profiler.mark("plugins_started")
 
         self._booted = True
         self._last_tick_time = time.perf_counter()
+        boot_profiler.mark("boot_complete")
+        boot_profiler.log_summary()
         logger.info("Aether booted successfully. %d plugin(s) active.", len(self.plugin_loader.loaded_plugins))
 
     def run(self) -> int:
@@ -245,7 +260,7 @@ class AetherApplication:
         self._shutdown_requested = True
 
         # 1. Stop tickable plugins (input threads)
-        self._stop_tickable_plugins()
+        self._stop_all_plugins()
 
         # 2. Stop services (persist, cleanup)
         for service in reversed(self._services):
@@ -312,22 +327,19 @@ class AetherApplication:
                     self._services.append(instance)
                     logger.debug("Discovered service: %s", key)
 
-    def _start_tickable_plugins(self) -> None:
-        """Call start() on plugins that implement TickablePlugin."""
-        from aether.core.plugin import TickablePlugin
-
+    def _start_all_plugins(self) -> None:
+        """Call start() on all loaded plugins."""
         if not self.plugin_loader:
             return
 
         for plugin in self.plugin_loader.loaded_plugins:
-            if isinstance(plugin, TickablePlugin):
-                try:
-                    plugin.start()
-                    logger.debug("Started tickable plugin: %s", plugin.name)
-                except Exception:
-                    logger.exception("Tickable plugin %s start failed", plugin.name)
-                    if self.strict_plugins:
-                        raise
+            try:
+                plugin.start()
+                logger.debug("Started plugin: %s", plugin.name)
+            except Exception:
+                logger.exception("Plugin %s start failed", plugin.name)
+                if self.strict_plugins:
+                    raise
 
     def _update_tickable_plugins(self, dt: float) -> None:
         """Call update(dt) on plugins that implement TickablePlugin."""
@@ -346,20 +358,17 @@ class AetherApplication:
                 except Exception:
                     logger.exception("Tickable plugin %s update failed", plugin.name)
 
-    def _stop_tickable_plugins(self) -> None:
-        """Call stop() on plugins that implement TickablePlugin."""
-        from aether.core.plugin import TickablePlugin
-
+    def _stop_all_plugins(self) -> None:
+        """Call stop() on all loaded plugins (reverse order)."""
         if not self.plugin_loader:
             return
 
         for plugin in reversed(self.plugin_loader.loaded_plugins):
-            if isinstance(plugin, TickablePlugin):
-                try:
-                    plugin.stop()
-                    logger.debug("Stopped tickable plugin: %s", plugin.name)
-                except Exception:
-                    logger.exception("Tickable plugin %s stop failed", plugin.name)
+            try:
+                plugin.stop()
+                logger.debug("Stopped plugin: %s", plugin.name)
+            except Exception:
+                logger.exception("Plugin %s stop failed", plugin.name)
 
     def _rate_limit(self, dt: float) -> None:
         """Sleep to maintain target tick rate."""

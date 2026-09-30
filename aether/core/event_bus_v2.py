@@ -53,6 +53,21 @@ class EventBus:
         self._lock = threading.RLock()
         self._delivering = False
 
+        # Metrics: per-event-type cumulative + 1-second window rates
+        self._stats: dict[str, dict] = defaultdict(
+            lambda: {"published": 0, "delivered": 0, "orphans": 0}
+        )
+        self._published_total: int = 0
+        self._delivered_total: int = 0
+        self._orphan_total: int = 0
+        self._window_published: int = 0
+        self._window_delivered: int = 0
+        self._window_orphans: int = 0
+        self._window_start: float = __import__("time").perf_counter()
+        self._events_per_sec: float = 0.0
+        self._delivered_per_sec: float = 0.0
+        self._orphans_per_sec: float = 0.0
+
     # --- Configuration ---
 
     @property
@@ -88,6 +103,15 @@ class EventBus:
 
     # --- Publish ---
 
+    def _event_key(self, event_type: Union[EventType, str]) -> str:
+        return event_type.value if isinstance(event_type, EventType) else event_type
+
+    def _count_published(self, event_type: Union[EventType, str]) -> None:
+        key = self._event_key(event_type)
+        self._stats[key]["published"] += 1
+        self._published_total += 1
+        self._window_published += 1
+
     def publish(self, event: Event) -> None:
         """Emit event. Behavior depends on mode:
         - queued=True:  append to internal queue, deliver on flush()
@@ -99,17 +123,47 @@ class EventBus:
         if self._queued:
             with self._lock:
                 event.timestamp = __import__("time").perf_counter()
+                self._count_published(event.type)
                 self._queue.append(event)
         else:
+            self._count_published(event.type)
             self._deliver(event)
 
     def publish_now(self, event_type: Union[EventType, str], payload: dict[str, Any] = None, source: str = "") -> None:
         """Convenience: create and publish immediately (bypasses queue even in queued mode).
         Use sparingly — only for system-critical events that must not wait.
         """
+        self._count_published(event_type)
         self._deliver(Event(type=event_type, payload=payload or {}, source=source))
 
     # --- Flush (called once per Application tick) ---
+
+    def _update_window_rates(self, now: float) -> None:
+        """Roll the 1-second window rates. Caller must hold the lock."""
+        elapsed = now - self._window_start
+        if elapsed >= 1.0:
+            self._events_per_sec = self._window_published / elapsed
+            self._delivered_per_sec = self._window_delivered / elapsed
+            self._orphans_per_sec = self._window_orphans / elapsed
+            self._window_published = 0
+            self._window_delivered = 0
+            self._window_orphans = 0
+            self._window_start = now
+
+    def _report_queue(self, depth: int, flush_ms: float, oldest_ms: float) -> None:
+        """Push event bus metrics to the profiler."""
+        profiler.set_queue(
+            "eventbus",
+            queued=depth,
+            flush_ms=flush_ms,
+            oldest_ms=oldest_ms,
+            events_per_sec=round(self._events_per_sec, 1),
+            delivered_per_sec=round(self._delivered_per_sec, 1),
+            orphans_per_sec=round(self._orphans_per_sec, 1),
+            total_published=self._published_total,
+            total_delivered=self._delivered_total,
+            total_orphans=self._orphan_total,
+        )
 
     def flush(self) -> int:
         """Deliver all queued events to subscribers. Returns count delivered.
@@ -118,15 +172,15 @@ class EventBus:
         t0 = __import__("time").perf_counter()
 
         with self._lock:
+            now = __import__("time").perf_counter()
+
             if not self._queue:
+                self._update_window_rates(now)
+                self._report_queue(depth=0, flush_ms=0.0, oldest_ms=0.0)
                 return 0
 
             # Compute oldest event age
-            now = __import__("time").perf_counter()
-            oldest_ms = 0.0
-            if self._queue:
-                oldest_ts = self._queue[0].timestamp
-                oldest_ms = (now - oldest_ts) * 1000.0
+            oldest_ms = (now - self._queue[0].timestamp) * 1000.0
 
             events = self._queue[:]
             self._queue.clear()
@@ -137,8 +191,12 @@ class EventBus:
             delivered += 1
 
         ms = (__import__("time").perf_counter() - t0) * 1000.0
+        with self._lock:
+            # Roll rates after delivery so this flush's deliveries/orphans
+            # are included in the window that just closed.
+            self._update_window_rates(__import__("time").perf_counter())
+            self._report_queue(depth=len(self._queue), flush_ms=ms, oldest_ms=oldest_ms)
         profiler._record_stage("eventbus_flush", ms)
-        profiler.set_queue("eventbus", queued=len(self._queue), flush_ms=ms, oldest_ms=oldest_ms)
 
         logger.debug("Flushed %d events", delivered)
         return delivered
@@ -160,11 +218,20 @@ class EventBus:
     def _deliver(self, event: Event) -> None:
         """Call all subscribers for event.type. Exceptions logged, not propagated."""
         # Normalize event type to string for subscriber lookup
-        event_key = event.type.value if isinstance(event.type, EventType) else event.type
+        event_key = self._event_key(event.type)
 
         # Snapshot subscribers under lock to avoid holding lock during callbacks
         with self._lock:
             subscribers = list(self._subscribers.get(event_key, []))
+            if subscribers:
+                self._stats[event_key]["delivered"] += len(subscribers)
+                self._delivered_total += len(subscribers)
+                self._window_delivered += len(subscribers)
+            else:
+                # Orphan event: published but nobody subscribed at delivery time
+                self._stats[event_key]["orphans"] += 1
+                self._orphan_total += 1
+                self._window_orphans += 1
 
         for callback in subscribers:
             try:
@@ -175,10 +242,29 @@ class EventBus:
     # --- Debug / Introspection ---
 
     def get_subscriber_count(self, event_type: Union[EventType, str]) -> int:
-        key = event_type.value if isinstance(event_type, EventType) else event_type
+        key = self._event_key(event_type)
         with self._lock:
             return len(self._subscribers.get(key, []))
 
     def get_all_event_types(self) -> list[str]:
         with self._lock:
             return list(self._subscribers.keys())
+
+    def get_event_stats(self) -> dict[str, dict]:
+        """Per-event-type counters: published / delivered / orphans (cumulative)."""
+        with self._lock:
+            return {k: dict(v) for k, v in self._stats.items()}
+
+    def get_orphan_event_types(self) -> list[str]:
+        """Event types that were published with zero subscribers at delivery."""
+        with self._lock:
+            return [k for k, v in self._stats.items() if v["orphans"] > 0]
+
+    def get_totals(self) -> dict:
+        """Cumulative published / delivered / orphan counts across all types."""
+        with self._lock:
+            return {
+                "published": self._published_total,
+                "delivered": self._delivered_total,
+                "orphans": self._orphan_total,
+            }
