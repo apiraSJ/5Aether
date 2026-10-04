@@ -17,6 +17,7 @@ from aether.ui.panel.memory_widget import MemoryPanelWidget
 from aether.ui.panel.ai_chat_widget import AIChatPanelWidget
 from aether.ui.panel.tasks_widget import TasksPanelWidget
 from aether.ui.panel.dashboard_widget import DashboardPanelWidget
+from aether.ui.panel.baseline_widget import BaselinePanelWidget
 
 logger = logging.getLogger("Aether.WidgetFactory")
 
@@ -26,6 +27,7 @@ _WIDGET_MAP: dict[str, type[PanelWidget]] = {
     "ai_chat": AIChatPanelWidget,
     "tasks": TasksPanelWidget,
     "dashboard": DashboardPanelWidget,
+    "baseline": BaselinePanelWidget,
     "camera": None,  # CameraWidget created separately (uses FrameBroker)
 }
 

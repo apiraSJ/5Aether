@@ -161,6 +161,14 @@ class EventType(str, Enum):
     MEMORY_SESSION_CREATED = "memory.session.created"
     MEMORY_SESSION_RESTORED = "memory.session.restored"
 
+    # ── Baseline (M1 Deterministic Baseline — ADR-AETHER-2026-001) ──
+    # Component selection/target for deterministic capture. Payload:
+    #   {component_id, name}
+    BASELINE_SELECTED = "baseline.selected"
+    # Snapshot persisted to disk + SQLite. Payload:
+    #   {component_id, name, snapshot_path, captured_at}
+    BASELINE_CAPTURED = "baseline.captured"
+
     # ── Task ───────────────────────────────────────────────────────────────
     TASK_CREATED = "task.created"
     TASK_UPDATED = "task.updated"

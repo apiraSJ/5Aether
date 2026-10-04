@@ -195,6 +195,14 @@ class GUIPlugin(TickablePlugin):
             z_index=10, visible=True,
         ))
 
+        # Baseline panel (M1 deterministic component capture, created by factory)
+        self._panel_registry.register(PanelInfo(
+            id="baseline", type="baseline",
+            label="Baseline",
+            x=0, y=1560, w=1900, h=440,
+            z_index=10, visible=True,
+        ))
+
         # Register PanelRegistry in DI container
         container.register_instance("panel_registry", self._panel_registry)
 

@@ -62,6 +62,12 @@ plugins:
   - module: "aether.phase_d.hand_plugin"
     class: "FrameBrokerPlugin"
 
+  # ── M1 Deterministic Baseline (needs memory_manager + frame_broker) ──
+  - module: "aether.plugins.baseline_plugin"
+    class: "BaselinePlugin"
+    config:
+      snapshots_dir: "data"
+
   # ── Vision pipeline (perception → result → adapter) ──────────────
   - module: "aether.vision.plugins"
     class: "PerceptionPlugin"

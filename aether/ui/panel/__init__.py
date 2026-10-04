@@ -27,6 +27,7 @@ from aether.ui.panel.memory_widget import MemoryPanelWidget
 from aether.ui.panel.ai_chat_widget import AIChatPanelWidget
 from aether.ui.panel.tasks_widget import TasksPanelWidget
 from aether.ui.panel.dashboard_widget import DashboardPanelWidget
+from aether.ui.panel.baseline_widget import BaselinePanelWidget
 
 __all__ = [
     "IPanel",
@@ -49,6 +50,7 @@ __all__ = [
     "AIChatPanelWidget",
     "TasksPanelWidget",
     "DashboardPanelWidget",
+    "BaselinePanelWidget",
     # Sprint 2A
     "PanelSession",
     "PanelController",
