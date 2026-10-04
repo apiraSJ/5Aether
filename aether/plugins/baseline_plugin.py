@@ -14,6 +14,7 @@ Commands registered:
     baseline.capture  — snapshot the current frame for the component
     baseline.status   — seeded / captured summary
     baseline.list     — render the baseline table
+    baseline.info     — show the full catalog entry for a component (M2 voice target)
 """
 
 from __future__ import annotations
@@ -57,6 +58,13 @@ _BASELINE_COMMANDS = [
         description="List all baseline components and their snapshots",
         category="baseline",
         aliases=("baseline",),
+    ),
+    CommandInfo(
+        name="baseline.info",
+        description="Show the full catalog entry (specs / inspection / troubleshooting) for a component",
+        category="baseline",
+        params_help="<component_id 1-5>",
+        examples=("baseline.info 2",),
     ),
 ]
 
@@ -140,6 +148,7 @@ class BaselinePlugin(PluginBase):
             self._command_bus.register_handler("baseline.capture", self._handle_capture)
             self._command_bus.register_handler("baseline.status", self._handle_status)
             self._command_bus.register_handler("baseline.list", self._handle_list)
+            self._command_bus.register_handler("baseline.info", self._handle_info)
 
     # ── Command handlers ──────────────────────────────────────────
 
@@ -219,4 +228,21 @@ class BaselinePlugin(PluginBase):
         return {
             "message": "Baseline catalog:\n" + "\n".join(lines),
             "baselines": entries,
+        }
+
+    def _handle_info(self, command: Command) -> dict:
+        component_id = str(command.params.get("component_id", "")).strip()
+        comp = get_component(component_id)
+        if comp is None:
+            return {"message": "Unknown component. Pick id 1-5 (baseline.info <id>)."}
+        lines = [
+            f"#{comp['id']} {comp['name']}",
+            f"  specifications: {comp['specifications']}",
+            f"  inspection: {comp['inspection_procedure']}",
+            f"  troubleshooting: {comp['troubleshooting']}",
+            f"  source: {comp['source_manual']}",
+        ]
+        return {
+            "message": "\n".join(lines),
+            "component": comp,
         }

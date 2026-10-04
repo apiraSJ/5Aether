@@ -169,6 +169,15 @@ class EventType(str, Enum):
     #   {component_id, name, snapshot_path, captured_at}
     BASELINE_CAPTURED = "baseline.captured"
 
+    # ── Voice (M2 Input Pipeline — ADR-AETHER-2026-002) ──
+    # Raw text produced by the STT provider. Payload: {text, confidence, source}
+    VOICE_TEXT_READY = "voice.text.ready"
+    # Text mapped to a command by the rule-based parser. Payload:
+    #   {intent, command, params, confidence, raw_input}
+    VOICE_INTENT_RESOLVED = "voice.intent.resolved"
+    # STT / parse failure. Payload: {message, hint?}
+    VOICE_ERROR = "voice.error"
+
     # ── Task ───────────────────────────────────────────────────────────────
     TASK_CREATED = "task.created"
     TASK_UPDATED = "task.updated"

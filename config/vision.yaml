@@ -68,6 +68,10 @@ plugins:
     config:
       snapshots_dir: "data"
 
+  # ── M2 Voice Input (deterministic provider by default; mic via voice.provider) ──
+  - module: "aether.plugins.voice_input_plugin"
+    class: "VoiceInputPlugin"
+
   # ── Vision pipeline (perception → result → adapter) ──────────────
   - module: "aether.vision.plugins"
     class: "PerceptionPlugin"
@@ -127,3 +131,12 @@ cursor:
 ai:
   enabled: true
   provider: echo
+
+# M2 Voice/Input Pipeline. Only 'voice.text' / 'voice.status' / 'voice.listen'
+# need this block; deterministic is the default so the demo needs no mic.
+voice:
+  enabled: true
+  provider: deterministic   # "deterministic" | "mic" (mic requires sounddevice+vosk + a model in models/)
+  model_path: "models/vosk-model-small-th"
+  duration_sec: 3
+  scripts: []               # deterministic demo/test transcripts for voice.listen

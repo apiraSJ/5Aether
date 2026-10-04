@@ -19,6 +19,7 @@ build/
 .pytest_cache/
 
 # Models (large files — track with Git LFS or download separately)
+models/
 *.pt
 *.onnx
 *.tflite

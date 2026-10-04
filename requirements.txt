@@ -10,3 +10,10 @@ mediapipe>=0.10.14
 dearpygui>=1.11.0
 PySide6>=6.6.0
 pynput>=1.7.6
+
+# M2 optional real-mic STT (config `voice.provider: mic`).
+# NOT required for tests/CI or the deterministic default path — both are
+# lazy-imported by aether/voice so their absence never breaks the suite.
+# The vosk model itself is downloaded separately into models/ (git-ignored).
+vosk>=0.3.45
+sounddevice>=0.4.6
