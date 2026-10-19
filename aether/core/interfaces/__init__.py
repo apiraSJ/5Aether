@@ -16,6 +16,7 @@ from aether.core.interfaces.i_memory_repository import (
 from aether.core.interfaces.i_memory_service import IMemoryService
 from aether.core.interfaces.i_reasoning_service import IReasoningService
 from aether.core.interfaces.i_context_provider import IContextProvider
+from aether.core.interfaces.i_schedule_repository import IScheduleRepository
 
 __all__ = [
     "IMemoryRepository",
@@ -26,4 +27,5 @@ __all__ = [
     "IMemoryService",
     "IReasoningService",
     "IContextProvider",
+    "IScheduleRepository",
 ]
