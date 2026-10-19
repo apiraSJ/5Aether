@@ -26,15 +26,18 @@ write and publish nothing):
     task.cancelled   — payload {"item": ..., "reason": str|None}
 
 Commands: task.create, task.list, task.complete, task.cancel,
-task.update, task.calendar. Handlers return plain dicts and translate
-ScheduleError into {"ok": False, "error": ...} with no event and no
-history (the service rolls the transaction back atomically).
+task.update, task.calendar, task.export, task.import. Handlers return
+plain dicts and translate ScheduleError into {"ok": False, "error": ...}
+with no event and no history (the service rolls the transaction back
+atomically).
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from aether.core.command import Command
@@ -43,7 +46,7 @@ from aether.core.event_bus_v2 import Event
 from aether.core.event_type import EventType
 from aether.core.plugin import PluginBase, PluginMetadata
 from aether.core.service_container import ServiceContainer
-from aether.task import calendar_query
+from aether.task import calendar_query, json_adapter
 from aether.task.calendar_query import day_view, month_view, views_to_dicts, week_view
 from aether.task.models import DEFAULT_TZ, ItemKind, ItemStatus, item_to_dict
 from aether.task.repository import SqliteScheduleRepository
@@ -92,6 +95,20 @@ _TASK_COMMANDS = [
         category="task",
         params_help="view=<day|week|month> date=<YYYY-MM-DD>  |  view=month year=YYYY month=M",
         examples=("task.calendar view=month year=2026 month=10", "task.calendar view=day date=2026-10-21"),
+    ),
+    CommandInfo(
+        name="task.export",
+        description="Export items to a provider-neutral JSON file",
+        category="task",
+        params_help="[path] [kind=<task|event>]",
+        examples=("task.export path=data/backup.json", "task.export"),
+    ),
+    CommandInfo(
+        name="task.import",
+        description="Import items from a JSON file (validated first, atomic)",
+        category="task",
+        params_help="<path> [on_conflict=review|update|skip]",
+        examples=("task.import path=data/backup.json", "task.import path=data/backup.json on_conflict=update"),
     ),
 ]
 
@@ -213,6 +230,8 @@ class TaskPlugin(PluginBase):
             self._command_bus.register_handler("task.cancel", self._handle_cancel)
             self._command_bus.register_handler("task.update", self._handle_update)
             self._command_bus.register_handler("task.calendar", self._handle_calendar)
+            self._command_bus.register_handler("task.export", self._handle_export)
+            self._command_bus.register_handler("task.import", self._handle_import)
 
     # ── Publish helpers (post-commit only) ─────────────────────────
 
@@ -426,3 +445,78 @@ class TaskPlugin(PluginBase):
             "view": view,
             "calendar": views_to_dicts(result),
         }
+
+    def _handle_export(self, command: Command) -> dict:
+        if not self._service:
+            return {"ok": False, "error": "task system not initialized"}
+        p = command.params
+
+        kind = None
+        kind_text = _opt(p.get("kind"))
+        if kind_text:
+            try:
+                kind = ItemKind(kind_text.lower())
+            except ValueError:
+                return {"ok": False, "error": f"invalid kind: {kind_text!r} (use 'task' or 'event')"}
+
+        path = _opt(p.get("path")) or "data/tasks-export.json"
+        items = self._service.list(kind=kind)
+        try:
+            written = json_adapter.export_to_file(items, path)
+        except OSError as e:
+            return {"ok": False, "error": f"cannot write {path}: {e}"}
+
+        return {
+            "ok": True,
+            "path": written,
+            "count": len(items),
+            "message": f"Exported {len(items)} item(s) to {written}",
+        }
+
+    def _handle_import(self, command: Command) -> dict:
+        if not self._service or not self._repo:
+            return {"ok": False, "error": "task system not initialized"}
+        p = command.params
+
+        path = _opt(p.get("path"))
+        if not path:
+            return {"ok": False, "error": "path is required"}
+
+        on_conflict = (_opt(p.get("on_conflict")) or "review").lower()
+        if on_conflict not in ("review", "update", "skip"):
+            return {
+                "ok": False,
+                "error": f"invalid on_conflict: {on_conflict!r} (use review|update|skip)",
+            }
+
+        target = Path(path)
+        try:
+            data = json_adapter.loads(target.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {"ok": False, "error": f"file not found: {path}"}
+        except UnicodeDecodeError:
+            return {"ok": False, "error": f"not a UTF-8 text file: {path}"}
+        except json.JSONDecodeError as e:
+            return {"ok": False, "error": f"invalid JSON in {path}: {e}"}
+        except OSError as e:
+            return {"ok": False, "error": f"cannot read {path}: {e}"}
+
+        try:
+            result = json_adapter.import_data(
+                self._service,
+                self._repo,
+                data,
+                on_conflict=on_conflict,
+                actor=str(command.source or "import"),
+            )
+        except json_adapter.ImportFormatError as e:
+            return {
+                "ok": False,
+                "error": f"validation failed — nothing imported ({len(e.errors)} problem(s))",
+                "errors": e.errors,
+            }
+        except ScheduleError as e:
+            # Domain failure inside the transaction: rolled back wholesale.
+            return {"ok": False, "error": f"import failed and was rolled back: {e}"}
+
+        return result.as_dict()

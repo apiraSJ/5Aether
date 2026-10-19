@@ -297,6 +297,36 @@ class ScheduleService:
             self._repo.delete(item_id)
         logger.info("item deleted: %s", item_id)
 
+    def import_item(
+        self,
+        item: TaskItem,
+        *,
+        existing: Optional[TaskItem] = None,
+        actor: str = "import",
+    ) -> TaskItem:
+        """Validate + persist one imported item (id preserved), history IMPORTED.
+
+        Used by the JSON adapter: domain rules and tz normalization are
+        identical to create() (single _validate path). `existing` (same id,
+        different content) supplies the history before-image for an explicit
+        on_conflict="update" overwrite — never a silent one.
+        """
+        now = time.time()
+        item = self._validate(item)
+        entry = HistoryEntry(
+            item_id=item.id,
+            action=HistoryAction.IMPORTED,
+            before=item_to_dict(existing) if existing is not None else None,
+            after=item_to_dict(item),
+            actor=actor,
+            created_at=now,
+        )
+        with self._repo.transaction():
+            self._repo.save(item)
+            self._repo.append_history(entry)
+        logger.info("item imported: %s (%s) %r", item.id, item.kind.value, item.title)
+        return item
+
     def attach_evidence(
         self,
         item_id: str,

@@ -8,6 +8,7 @@ back atomically, return {"ok": False} and publish nothing.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -92,6 +93,8 @@ class TestLifecycle:
             "task.cancel",
             "task.update",
             "task.calendar",
+            "task.export",
+            "task.import",
         ]
 
     def test_initialize_registers_shared_services(self, env):
@@ -104,7 +107,10 @@ class TestLifecycle:
     def test_commands_registered_on_bus_and_registry(self, env):
         _, container, _, _ = env
         registry = container.resolve("command_registry")
-        for name in ("task.create", "task.list", "task.complete", "task.cancel", "task.update", "task.calendar"):
+        for name in (
+            "task.create", "task.list", "task.complete", "task.cancel",
+            "task.update", "task.calendar", "task.export", "task.import",
+        ):
             assert registry.is_registered(name), name
 
     def test_start_opens_repo_and_publishes_ready(self, env):
@@ -486,6 +492,164 @@ class TestSharedStateAndConfig:
         memory_path.write_bytes(b"sentinel")
         _dispatch(container, "task.create", {"title": "x", "due_date": "2026-11-05"})
         assert memory_path.read_bytes() == b"sentinel"
+
+
+class TestExportImportCommands:
+    @staticmethod
+    def _write_json(tmp_path, name, payload):
+        path = tmp_path / name
+        path.write_text(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=1),
+            encoding="utf-8",
+        )
+        return str(path)
+
+    def test_export_writes_valid_payload(self, env, tmp_path):
+        _, container, _, _ = env
+        _dispatch(container, "task.create", {"title": "ค่าไฟ", "due_date": "2026-11-05"})
+        path = str(tmp_path / "backup.json")
+        result = _dispatch(container, "task.export", {"path": path})
+        assert result["ok"] is True
+        assert result["count"] == 1
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        assert data["format_version"] == "1"
+        assert data["items"][0]["title"] == "ค่าไฟ"
+
+    def test_export_kind_filter(self, env, tmp_path):
+        _, container, _, _ = env
+        _dispatch(container, "task.create", {"title": "t1", "due_date": "2026-11-05"})
+        _dispatch(container, "task.create", {"kind": "event", "title": "e1", "start_at": "2026-11-06T09:00:00+07:00"})
+        path = str(tmp_path / "tasks.json")
+        result = _dispatch(container, "task.export", {"path": path, "kind": "task"})
+        assert result["ok"] is True
+        assert result["count"] == 1
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        assert [i["kind"] for i in data["items"]] == ["task"]
+
+    def test_export_invalid_kind(self, env):
+        _, container, _, _ = env
+        result = _dispatch(container, "task.export", {"kind": "bogus"})
+        assert result["ok"] is False
+        assert "invalid kind" in result["error"]
+
+    def test_import_restores_deleted_items(self, env, tmp_path):
+        _, container, _, _ = env
+        created = _dispatch(container, "task.create", {"title": "restore me", "due_date": "2026-11-05"})
+        path = str(tmp_path / "backup.json")
+        assert _dispatch(container, "task.export", {"path": path})["ok"] is True
+
+        container.resolve("schedule_service").delete(created["item_id"], actor="test")
+        assert _dispatch(container, "task.list", {})["count"] == 0
+
+        result = _dispatch(container, "task.import", {"path": path})
+        assert result["ok"] is True
+        assert result["imported"] == 1
+        assert result["batch_id"]
+        listed = _dispatch(container, "task.list", {})
+        assert [i["id"] for i in listed["items"]] == [created["item_id"]]
+
+    def test_import_same_file_twice_already_imported(self, env, tmp_path):
+        _, container, _, _ = env
+        _dispatch(container, "task.create", {"title": "x", "due_date": "2026-11-05"})
+        path = str(tmp_path / "backup.json")
+        _dispatch(container, "task.export", {"path": path})
+        container.resolve("schedule_service").delete(
+            _dispatch(container, "task.list", {})["items"][0]["id"], actor="test"
+        )
+        assert _dispatch(container, "task.import", {"path": path})["imported"] == 1
+        second = _dispatch(container, "task.import", {"path": path})
+        assert second["ok"] is True
+        assert second["already_imported"] is True
+        assert _dispatch(container, "task.list", {})["count"] == 1
+
+    def test_import_missing_file(self, env, tmp_path):
+        _, container, _, _ = env
+        result = _dispatch(container, "task.import", {"path": str(tmp_path / "nope.json")})
+        assert result["ok"] is False
+        assert "not found" in result["error"]
+
+    def test_import_invalid_json(self, env, tmp_path):
+        _, container, _, _ = env
+        path = tmp_path / "broken.json"
+        path.write_text("{not json", encoding="utf-8")
+        result = _dispatch(container, "task.import", {"path": str(path)})
+        assert result["ok"] is False
+        assert "invalid JSON" in result["error"]
+
+    def test_import_validation_failure_reports_errors_zero_writes(self, env, tmp_path):
+        _, container, _, _ = env
+        payload = {
+            "format_version": "1",
+            "items": [{"id": "", "kind": "task", "title": "", "due_date": "26-10-20"}],
+        }
+        path = self._write_json(tmp_path, "bad.json", payload)
+        result = _dispatch(container, "task.import", {"path": path})
+        assert result["ok"] is False
+        assert "nothing imported" in result["error"]
+        assert len(result["errors"]) >= 3
+        assert _dispatch(container, "task.list", {})["count"] == 0
+
+    def test_import_invalid_on_conflict(self, env, tmp_path):
+        _, container, _, _ = env
+        path = self._write_json(tmp_path, "empty.json", {"format_version": "1", "items": []})
+        result = _dispatch(container, "task.import", {"path": path, "on_conflict": "merge"})
+        assert result["ok"] is False
+        assert "on_conflict" in result["error"]
+
+    def test_import_conflict_review_via_command(self, env, tmp_path):
+        _, container, _, _ = env
+        created = _dispatch(container, "task.create", {"title": "old", "due_date": "2026-11-05"})
+        payload = {
+            "format_version": "1",
+            "source": "test",
+            "items": [dict(created["item"], title="new")],
+        }
+        path = self._write_json(tmp_path, "edit.json", payload)
+        result = _dispatch(container, "task.import", {"path": path})
+        assert result["ok"] is True
+        assert result["conflicts"] == 1
+        assert result["parked"] == 1
+        listed = _dispatch(container, "task.list", {})
+        assert listed["items"][0]["title"] == "old"  # never silently overwritten
+
+    def test_import_conflict_update_via_command(self, env, tmp_path):
+        _, container, _, _ = env
+        created = _dispatch(container, "task.create", {"title": "old", "due_date": "2026-11-05"})
+        payload = {
+            "format_version": "1",
+            "source": "test",
+            "items": [dict(created["item"], title="new")],
+        }
+        path = self._write_json(tmp_path, "edit.json", payload)
+        result = _dispatch(container, "task.import", {"path": path, "on_conflict": "update"})
+        assert result["ok"] is True
+        assert result["updated"] == 1
+        listed = _dispatch(container, "task.list", {})
+        assert listed["items"][0]["title"] == "new"
+        hist = container.resolve("schedule_service").history(created["item_id"])
+        assert hist[0].action.value == "imported"
+        assert hist[0].before["title"] == "old"
+        assert hist[0].after["title"] == "new"
+
+    def test_import_domain_failure_rolled_back(self, env, tmp_path):
+        _, container, _, _ = env
+        payload = {
+            "format_version": "1",
+            "source": "test",
+            "items": [
+                dict(kind="task", title="good", due_date="2026-11-05", id="item_good00000001",
+                     status="pending", internal_status="confirmed", all_day=False,
+                     tz="Asia/Bangkok", created_at=1.0, updated_at=1.0),
+                dict(kind="event", title="bad", status="completed", id="item_bad0000000001",
+                     start_at="2026-11-06T09:00:00+07:00", due_date=None, all_day=False,
+                     tz="Asia/Bangkok", created_at=1.0, updated_at=1.0),
+            ],
+        }
+        path = self._write_json(tmp_path, "domain.json", payload)
+        result = _dispatch(container, "task.import", {"path": path})
+        assert result["ok"] is False
+        assert "rolled back" in result["error"]
+        assert _dispatch(container, "task.list", {})["count"] == 0  # nothing partially written
 
 
 class TestConfigFiles:
