@@ -392,6 +392,15 @@ class ScheduleService:
                     )
         else:
             # Timed values must be ISO-8601; naive times get the item tz offset.
+            # A bare date is never turned into midnight (locked rule): date-only
+            # start_at/end_at require all_day=True (json_adapter enforces the
+            # same at validation).
+            for name, value in (("start_at", item.start_at), ("end_at", item.end_at)):
+                if value is not None and is_date_only(value):
+                    raise ScheduleValidationError(
+                        f"{name} must include a time when all_day=False "
+                        f"(a bare date is never turned into midnight), got {value!r}"
+                    )
             start = (
                 normalize_datetime(item.start_at, item.tz)
                 if item.start_at is not None

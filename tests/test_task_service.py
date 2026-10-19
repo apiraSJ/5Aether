@@ -104,6 +104,40 @@ class TestCreateValidation:
                 start_at="2026-11-05T00:00:00+07:00",
             )
 
+    # R6: a bare date is never inflated to midnight when all_day=False.
+    def test_date_only_start_at_without_all_day_rejected(self, service):
+        with pytest.raises(ScheduleValidationError, match="start_at"):
+            service.create(ItemKind.EVENT, "x", start_at="2026-10-20")
+
+    def test_date_only_end_at_without_all_day_rejected(self, service):
+        with pytest.raises(ScheduleValidationError, match="end_at"):
+            service.create(
+                ItemKind.EVENT, "x",
+                start_at="2026-10-20T09:00:00+07:00",
+                end_at="2026-10-22",
+            )
+
+    def test_date_only_task_end_at_without_all_day_rejected(self, service):
+        with pytest.raises(ScheduleValidationError, match="end_at"):
+            service.create(ItemKind.TASK, "x", end_at="2026-10-22")
+
+    def test_date_only_rejected_even_for_explicit_midnight_input(self, service):
+        """Only all_day=True may carry date-only; timed input stays timed."""
+        item = service.create(
+            ItemKind.EVENT, "x",
+            start_at="2026-10-20T00:00:00+07:00",
+            end_at="2026-10-20T01:00:00+07:00",
+        )
+        assert item.start_at == "2026-10-20T00:00:00+07:00"
+
+    def test_all_day_date_only_still_accepted(self, service):
+        item = service.create(
+            ItemKind.EVENT, "x", all_day=True,
+            start_at="2026-10-20", end_at="2026-10-22",
+        )
+        assert item.start_at == "2026-10-20"
+        assert item.end_at == "2026-10-22"
+
     def test_event_end_before_start_rejected(self, service):
         with pytest.raises(ScheduleValidationError, match="before start_at"):
             service.create(
