@@ -174,6 +174,26 @@ def load_and_validate(data: Any) -> List[Dict[str, Any]]:
     return raw_items
 
 
+def _as_aware_datetime(value: str, tz_name: Any) -> Optional[datetime]:
+    """ISO-8601 string -> offset-aware datetime (naive gets ``tz_name``).
+
+    Returns None when the value is unparsable or the tz is unsupported —
+    both cases are already reported by the structural checks above, so the
+    chronology check simply skips them. Mirrors ScheduleService._validate
+    (same normalize-then-compare semantics) so adapter and service agree.
+    """
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        try:
+            dt = dt.replace(tzinfo=tzinfo_for(tz_name))
+        except (KeyError, TypeError, ValueError):
+            return None
+    return dt
+
+
 def _validate_item_raw(index: int, raw: Any) -> List[str]:
     prefix = f"items[{index}]"
     if not isinstance(raw, dict):
@@ -271,11 +291,17 @@ def _validate_item_raw(index: int, raw: Any) -> List[str]:
         if value is not None and not isinstance(value, (int, float)):
             errors.append(f"{prefix}.{name}: expected number or null, got {type(value).__name__}")
 
-    # Chronology (both ends structurally parseable).
+    # Chronology: compare instants, never raw strings (mixed offsets make
+    # lexicographic order meaningless). Date-only stays string-compared.
     start_at, end_at = raw.get("start_at"), raw.get("end_at")
     if isinstance(start_at, str) and isinstance(end_at, str):
-        if _DATE_RE.match(start_at[:10]) and _DATE_RE.match(end_at[:10]):
+        if is_date_only(start_at) and is_date_only(end_at):
             if end_at < start_at:
+                errors.append(f"{prefix}: end {end_at!r} is before start {start_at!r}")
+        elif "T" in start_at and "T" in end_at:
+            start_dt = _as_aware_datetime(start_at, tz)
+            end_dt = _as_aware_datetime(end_at, tz)
+            if start_dt is not None and end_dt is not None and end_dt < start_dt:
                 errors.append(f"{prefix}: end {end_at!r} is before start {start_at!r}")
 
     return errors

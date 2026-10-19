@@ -247,6 +247,59 @@ class TestValidationCollectsErrors:
                 end_at="2026-10-20T09:00:00+07:00",
             )))
 
+    # ── R1: chronology must compare instants, not raw strings ──────────
+
+    def test_mixed_offset_end_before_start_rejected(self):
+        # 14:00+09:00 == 05:00Z ; 08:00+07:00 == 01:00Z -> end is earlier.
+        with pytest.raises(ImportFormatError, match="before start"):
+            load_and_validate(_payload(_event_dict(
+                start_at="2026-10-20T14:00:00+09:00",
+                end_at="2026-10-20T08:00:00+07:00",
+            )))
+
+    def test_mixed_offset_same_instant_accepted(self):
+        # 14:00+09:00 == 12:00+07:00 == 05:00Z ; string order said "end <
+        # start" (12 < 14) and rejected — instants are equal.
+        raw = load_and_validate(_payload(_event_dict(
+            start_at="2026-10-20T14:00:00+09:00",
+            end_at="2026-10-20T12:00:00+07:00",
+        )))
+        assert len(raw) == 1
+
+    def test_lexicographic_false_reject_is_accepted(self):
+        # 01:00+09:00 == 16:00Z(19th) ; 00:30+07:00 == 17:30Z(19th) -> end
+        # is later in real time, but "00:30" < "01:00" as a string.
+        raw = load_and_validate(_payload(_event_dict(
+            start_at="2026-10-20T01:00:00+09:00",
+            end_at="2026-10-20T00:30:00+07:00",
+        )))
+        assert len(raw) == 1
+
+    def test_lexicographic_false_accept_is_rejected(self):
+        # 02:00+07:00 == 19:00Z(19th) ; 03:00+09:00 == 18:00Z(19th) -> end
+        # is earlier in real time, but "03:00" > "02:00" as a string.
+        with pytest.raises(ImportFormatError, match="before start"):
+            load_and_validate(_payload(_event_dict(
+                start_at="2026-10-20T02:00:00+07:00",
+                end_at="2026-10-20T03:00:00+09:00",
+            )))
+
+    def test_naive_end_before_aware_start_rejected(self):
+        # Naive values are interpreted in the item tz before comparing.
+        with pytest.raises(ImportFormatError, match="before start"):
+            load_and_validate(_payload(_event_dict(
+                start_at="2026-10-20T10:00:00+07:00",
+                end_at="2026-10-20T09:00:00",
+            )))
+
+    def test_all_day_end_before_start_rejected(self):
+        with pytest.raises(ImportFormatError, match="before start"):
+            load_and_validate(_payload(_event_dict(
+                all_day=True,
+                start_at="2026-10-22",
+                end_at="2026-10-20",
+            )))
+
     def test_bad_status_rejected(self):
         with pytest.raises(ImportFormatError, match="status"):
             load_and_validate(_payload(_task_dict(status="archived")))
@@ -330,6 +383,17 @@ class TestImportNewItems:
         reformatted = json.loads(json.dumps(data, indent=4))  # other whitespace
         assert json.dumps(reformatted, indent=4) != dumps(data)
         assert import_data(service, repo, reformatted).already_imported is True
+
+    def test_mixed_offset_event_imports_and_preserves_offsets(self, service, repo):
+        # R1 parity: the adapter must accept what the service accepts.
+        result = import_data(service, repo, _payload(_event_dict(
+            start_at="2026-10-20T14:00:00+09:00",
+            end_at="2026-10-20T12:00:00+07:00",
+        )))
+        assert result.ok and result.imported == 1
+        stored = repo.find_by_id("item_bbbb00000002")
+        assert stored.start_at == "2026-10-20T14:00:00+09:00"
+        assert stored.end_at == "2026-10-20T12:00:00+07:00"
 
     def test_naive_datetime_normalized_on_import(self, service, repo):
         raw = _event_dict(start_at="2026-10-20T09:00:00", end_at="2026-10-20T10:00:00")
