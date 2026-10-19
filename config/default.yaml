@@ -34,6 +34,10 @@ plugins:
   - module: "aether.plugins.memory_plugin"
     class: "MemoryPlugin"
 
+  # ── Mark 1 Task & Calendar (data/tasks.db, separate from memory) ─
+  - module: "aether.plugins.task_plugin"
+    class: "TaskPlugin"
+
   # ── AI assistant (owns ai.chat command) ──────────────────────────
   - module: "aether.plugins.ai_plugin"
     class: "AIPlugin"
@@ -48,6 +52,9 @@ plugins:
 
 memory:
   db_path: "data/memory.db"
+
+task:
+  db_path: "data/tasks.db"
 
 ai:
   enabled: true

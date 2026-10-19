@@ -72,6 +72,10 @@ plugins:
   - module: "aether.plugins.voice_input_plugin"
     class: "VoiceInputPlugin"
 
+  # ── Mark 1 Task & Calendar (data/tasks.db, separate from memory) ─
+  - module: "aether.plugins.task_plugin"
+    class: "TaskPlugin"
+
   # ── Vision pipeline (perception → result → adapter) ──────────────
   - module: "aether.vision.plugins"
     class: "PerceptionPlugin"

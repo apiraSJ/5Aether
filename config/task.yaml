@@ -1,0 +1,8 @@
+# Task & Calendar Configuration for Aether Mark 1
+# Controls the schedule database path used by task_plugin.
+# Separate from memory.db — locked Mark 1 decision (source of truth for
+# tasks and events; Memory Core is untouched by this system).
+
+task:
+  # Database path (relative to project root)
+  db_path: "data/tasks.db"

@@ -179,10 +179,18 @@ class EventType(str, Enum):
     VOICE_ERROR = "voice.error"
 
     # ── Task ───────────────────────────────────────────────────────────────
+    # Mark 1 (ADR-AETHER-2026-003): published by task_plugin AFTER the
+    # ScheduleService transaction commits. Payload: {"item": item_to_dict(...)}
     TASK_CREATED = "task.created"
+    # Payload: {"item": ..., "changed_fields": [str]}
     TASK_UPDATED = "task.updated"
+    # Payload: {"item": ...}
     TASK_COMPLETED = "task.completed"
+    # Payload: {"item": ..., "reason": str|None}
     TASK_CANCELLED = "task.cancelled"
+    # Published once by task_plugin.start() after the repo opens.
+    # Payload: {"db_path": str, "items": int}
+    TASK_READY = "task.ready"
 
     # ── Context ────────────────────────────────────────────────────────────
     CONTEXT_CHANGED = "context.changed"
@@ -254,6 +262,7 @@ class EventType(str, Enum):
             "task_updated": cls.TASK_UPDATED,
             "task_completed": cls.TASK_COMPLETED,
             "task_cancelled": cls.TASK_CANCELLED,
+            "task_ready": cls.TASK_READY,
             # Plugins
             "plugin_started": cls.PLUGIN_LOADED,
             "plugin_stopped": cls.PLUGIN_UNLOADED,
