@@ -328,3 +328,85 @@ class TestPatchTasks:
         response = wired.client.patch(f"/api/v1/tasks/{item['id']}", json={})
         assert response.status_code == 400
         assert response.json()["error"] == "validation_error"
+
+
+# ── POST /tasks/{id}/complete, /cancel (P3 — Status) ───────────────
+
+
+class TestLifecycleEndpoints:
+    def _create(self, wired, kind="task", **extra):
+        body = {"kind": kind, "title": "Lifecycle", **extra}
+        return wired.client.post("/api/v1/tasks", json=body).json()
+
+    def test_complete_pending_task(self, wired):
+        item = self._create(wired)
+        response = wired.client.post(f"/api/v1/tasks/{item['id']}/complete")
+        assert response.status_code == 200
+        assert response.json()["status"] == "completed"
+
+    def test_complete_twice_is_rejected(self, wired):
+        item = self._create(wired)
+        wired.client.post(f"/api/v1/tasks/{item['id']}/complete")
+        response = wired.client.post(f"/api/v1/tasks/{item['id']}/complete")
+        assert response.status_code == 400
+        assert response.json()["error"] == "validation_error"
+
+    def test_event_cannot_be_completed(self, wired):
+        item = self._create(
+            wired,
+            kind="event",
+            start_at="2026-10-21T10:00:00+07:00",
+            end_at="2026-10-21T11:00:00+07:00",
+        )
+        response = wired.client.post(f"/api/v1/tasks/{item['id']}/complete")
+        assert response.status_code == 400
+
+    def test_complete_unknown_item_is_404(self, wired):
+        response = wired.client.post("/api/v1/tasks/no-such-id/complete")
+        assert response.status_code == 404
+        assert response.json()["error"] == "not_found"
+
+    def test_cancel_pending_task(self, wired):
+        item = self._create(wired)
+        response = wired.client.post(f"/api/v1/tasks/{item['id']}/cancel")
+        assert response.status_code == 200
+        assert response.json()["status"] == "cancelled"
+
+    def test_cancel_event_allowed(self, wired):
+        item = self._create(
+            wired,
+            kind="event",
+            start_at="2026-10-21T10:00:00+07:00",
+            end_at="2026-10-21T11:00:00+07:00",
+        )
+        response = wired.client.post(f"/api/v1/tasks/{item['id']}/cancel")
+        assert response.status_code == 200
+        assert response.json()["status"] == "cancelled"
+
+    def test_cancel_reason_recorded_in_history(self, wired):
+        item = self._create(wired)
+        wired.client.post(
+            f"/api/v1/tasks/{item['id']}/cancel?reason=conflict+with+meeting"
+        )
+        entries = wired.service.history(item["id"])
+        cancel_entry = next(e for e in entries if e.action.value == "cancelled")
+        assert cancel_entry.note == "conflict with meeting"
+
+    def test_cancelled_item_cannot_be_completed(self, wired):
+        item = self._create(wired)
+        wired.client.post(f"/api/v1/tasks/{item['id']}/cancel")
+        response = wired.client.post(f"/api/v1/tasks/{item['id']}/complete")
+        assert response.status_code == 400
+
+    def test_terminal_status_cannot_be_reverted_via_patch(self, wired):
+        """The engine's terminal-status rule holds through the API."""
+        item = self._create(wired)
+        wired.client.post(f"/api/v1/tasks/{item['id']}/complete")
+        current = wired.client.get(f"/api/v1/tasks/{item['id']}").json()
+        response = wired.client.patch(
+            f"/api/v1/tasks/{item['id']}",
+            json={"status": "pending"},
+            headers={"If-Match": str(current["updated_at"])},
+        )
+        assert response.status_code == 400
+        assert response.json()["error"] == "validation_error"

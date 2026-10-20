@@ -142,6 +142,12 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 .task-table td button {
   padding: 3px 10px;
   font-size: 12px;
+  margin-right: 4px;
+}
+
+.task-table td button.danger:hover {
+  border-color: var(--bad);
+  color: var(--bad);
 }
 
 .error-banner {

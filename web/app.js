@@ -103,17 +103,50 @@ function render(items) {
     status.appendChild(badge);
 
     const actions = document.createElement("td");
+
     const editBtn = document.createElement("button");
     editBtn.type = "button";
     editBtn.textContent = "Edit";
     editBtn.addEventListener("click", () => startEdit(item.id));
     actions.appendChild(editBtn);
 
+    // Status actions (P3): only pending items can transition.
+    if (item.status === "pending") {
+      const doneBtn = document.createElement("button");
+      doneBtn.type = "button";
+      doneBtn.textContent = "Done";
+      doneBtn.addEventListener("click", () => setStatus(item.id, "complete"));
+      actions.appendChild(doneBtn);
+
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.className = "danger";
+      cancelBtn.addEventListener("click", () => setStatus(item.id, "cancel"));
+      actions.appendChild(cancelBtn);
+    }
+
     row.append(title, when, kind, status, actions);
     els.list.appendChild(row);
   }
   els.table.hidden = items.length === 0;
   els.empty.hidden = items.length > 0;
+}
+
+/** POST /tasks/{id}/complete or /cancel, then refresh from the server. */
+async function setStatus(id, action) {
+  els.listError.hidden = true;
+  try {
+    const response = await fetch(`${API}/tasks/${id}/${action}`, {
+      method: "POST",
+    });
+    if (!response.ok) {
+      throw new Error(await readErrorMessage(response, `HTTP ${response.status}`));
+    }
+    await loadTasks();
+  } catch (err) {
+    showListError(`Could not ${action}: ${err.message}`);
+  }
 }
 
 async function loadTasks() {
