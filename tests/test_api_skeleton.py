@@ -31,6 +31,21 @@ def client(app):
     return TestClient(app, base_url="http://localhost")
 
 
+@pytest.fixture
+def wired_client(tmp_path):
+    """Test client wired to a real ScheduleService backed by a temp database."""
+    from aether.task.repository import SqliteScheduleRepository
+    from aether.task.service import ScheduleService
+
+    repo = SqliteScheduleRepository(str(tmp_path / "tasks.db"))
+    repo.open()
+    container = ServiceContainer()
+    container.register_instance("schedule_service", ScheduleService(repo))
+    wired_app = create_app(container=container)
+    yield TestClient(wired_app, base_url="http://localhost")
+    repo.close()
+
+
 class TestHealthEndpoint:
     """Tests for the health check endpoint."""
 
@@ -211,3 +226,40 @@ class TestAPIRoutesRegistered:
         )
         # Should be 404 (not found) since endpoint is excluded from Sprint 1
         assert response.status_code == 404
+
+
+class TestCreateSourceDefault:
+    """Create must resolve ``source`` from the schema default only.
+
+    API Contract v1.1: when the client omits ``source`` the stored value is
+    ``"manual"`` (same default as TaskItem and ScheduleService.create); an
+    explicitly provided value is preserved as-is.
+    """
+
+    def test_source_defaults_to_manual(self, wired_client: TestClient):
+        """Omitting source stores 'manual' — not a route-invented fallback."""
+        response = wired_client.post(
+            "/api/v1/tasks",
+            json={"kind": "task", "title": "Buy milk"},
+        )
+        assert response.status_code == 201
+        assert response.json()["source"] == "manual"
+
+    def test_explicit_source_preserved(self, wired_client: TestClient):
+        """A client-provided source is stored unchanged."""
+        response = wired_client.post(
+            "/api/v1/tasks",
+            json={"kind": "task", "title": "Imported item", "source": "import"},
+        )
+        assert response.status_code == 201
+        assert response.json()["source"] == "import"
+
+    def test_source_round_trips_through_service(self, wired_client: TestClient):
+        """The stored source is what a subsequent GET returns."""
+        created = wired_client.post(
+            "/api/v1/tasks",
+            json={"kind": "task", "title": "Persist check"},
+        ).json()
+        fetched = wired_client.get(f"/api/v1/tasks/{created['id']}")
+        assert fetched.status_code == 200
+        assert fetched.json()["source"] == "manual"

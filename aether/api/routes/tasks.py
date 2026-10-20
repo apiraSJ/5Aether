@@ -16,7 +16,7 @@ from aether.api.schemas import (
     TaskItemUpdate,
     TaskListResponse,
 )
-from aether.task.models import ItemKind, ItemStatus
+from aether.task.models import InternalStatus, ItemKind, ItemStatus
 from aether.task.service import ScheduleService
 
 
@@ -71,8 +71,8 @@ async def create_task(
         all_day=payload.all_day,
         tz=payload.tz,
         owner=payload.owner,
-        source=payload.source or "web",
-        internal_status="confirmed",  # MVP: always confirmed
+        source=payload.source,
+        internal_status=InternalStatus.CONFIRMED,  # MVP: always confirmed
     )
     return TaskItemResponse.model_validate(item)
 
