@@ -410,3 +410,76 @@ class TestLifecycleEndpoints:
         )
         assert response.status_code == 400
         assert response.json()["error"] == "validation_error"
+
+
+# ── DELETE + history (Task Endpoints closure, before Calendar) ─────
+
+
+class TestDeleteEndpoint:
+    def test_delete_returns_204_and_item_disappears(self, wired):
+        item = wired.client.post(
+            "/api/v1/tasks", json={"kind": "task", "title": "Temp"}
+        ).json()
+        response = wired.client.delete(f"/api/v1/tasks/{item['id']}")
+        assert response.status_code == 204
+        assert wired.client.get(f"/api/v1/tasks/{item['id']}").status_code == 404
+        # Gone from the list too.
+        remaining = wired.client.get("/api/v1/tasks").json()
+        assert all(i["id"] != item["id"] for i in remaining["items"])
+
+    def test_delete_unknown_item_is_404(self, wired):
+        response = wired.client.delete("/api/v1/tasks/no-such-id")
+        assert response.status_code == 404
+        assert response.json()["error"] == "not_found"
+
+    def test_delete_preserves_history(self, wired):
+        """History is append-only: the audit trail survives the item."""
+        item = wired.client.post(
+            "/api/v1/tasks", json={"kind": "task", "title": "Ephemeral"}
+        ).json()
+        wired.client.delete(f"/api/v1/tasks/{item['id']}")
+        entries = wired.service.history(item["id"])
+        actions = [e.action.value for e in entries]
+        assert "created" in actions
+        assert "deleted" in actions
+
+
+class TestHistoryEndpoint:
+    def _create_and_edit(self, wired):
+        item = wired.client.post(
+            "/api/v1/tasks", json={"kind": "task", "title": "Audited"}
+        ).json()
+        wired.client.patch(
+            f"/api/v1/tasks/{item['id']}",
+            json={"title": "Audited v2"},
+            headers={"If-Match": str(item["updated_at"])},
+        )
+        return item
+
+    def test_history_lists_actions_newest_first(self, wired):
+        item = self._create_and_edit(wired)
+        response = wired.client.get(f"/api/v1/tasks/{item['id']}/history")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["count"] == 2
+        actions = [e["action"] for e in data["entries"]]
+        assert actions == ["updated", "created"]
+        updated = data["entries"][0]
+        assert updated["changed_fields"] == ["title"]
+        assert updated["before"]["title"] == "Audited"
+        assert updated["after"]["title"] == "Audited v2"
+        assert isinstance(updated["created_at"], float)
+
+    def test_history_respects_limit(self, wired):
+        item = self._create_and_edit(wired)
+        response = wired.client.get(
+            f"/api/v1/tasks/{item['id']}/history", params={"limit": 1}
+        )
+        assert response.status_code == 200
+        assert response.json()["count"] == 1
+
+    def test_history_of_unknown_item_is_empty_log(self, wired):
+        """History is an append-only log: no item means no entries (200)."""
+        response = wired.client.get("/api/v1/tasks/no-such-id/history")
+        assert response.status_code == 200
+        assert response.json() == {"entries": [], "count": 0}
