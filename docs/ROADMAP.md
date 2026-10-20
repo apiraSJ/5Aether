@@ -1,6 +1,6 @@
-# Aether Roadmap
+# Aether Mark-1 Roadmap
 
-## Current Status
+## Current Status (commit `a148439`)
 
 **Backend v1.0.0** — Architecture Stable (tagged `backend-v1.0.0`)
 
@@ -8,51 +8,117 @@
 - Vision pipeline: Camera, YOLO, MediaPipe, FrameBroker, AdaptiveScheduler
 - UI: UIShell with camera, panels, workspace, lifecycle (show/hide/toggle)
 - CLI: Event-driven with IntentResolver, CommandRegistry, tab-completion
-- Tests: 921 passing
-
-### Commit History (UI Lifecycle)
-
-```
-dfd5d36 feat: add UI-1 shell show/hide API       (921 tests)
-d73b82a feat: add background startup mode          (909 tests)
-1f606d7 feat: add UIShell UI foundation            (909 tests)
-f363b5c feat: Phase 3.3 Intent Reasoning
-3ad8595 feat: Phase 3.2 Memory Retriever
-```
+- **Schedule Engine (Track A):** Task/Calendar domain, SQLite `tasks.db`, import/export, validation — 1,349 tests passing
 
 ---
 
-## Phase 3A — AI Command Interface
+## Track A — Schedule Engine (Python)
 
-**Goal:** User can control Aether via natural language in the CLI.
+**Goal:** Deterministic Task & Calendar engine with validation, import/export, and review queue.
 
-### Sprint 1 — CLI Polish ✅
+### Phase 1 — Schedule Domain ✅
 
-- [x] CLI Plugin (event-driven, readline with fallback)
-- [x] IntentResolver interface + RuleEngine (14 patterns)
-- [x] CommandRegistry (autocomplete, help, categories)
-- [x] ResultFormatter (colored output, silent filter)
-- [x] SystemCommandPlugin (help, status, plugins, ping, quit)
+- [x] Data model: `TaskItem` (task + event), `Evidence`, `HistoryEntry`, `ReviewEntry`, `ImportBatch`
+- [x] SQLite schema with WAL, FK, `user_version` migrations
+- [x] `IScheduleRepository` + `SqliteScheduleRepository`
+- [x] `ScheduleService` with validated CRUD, optimistic concurrency, audit history
+- [x] 110 tests
 
-### Sprint 2 — Spatial Memory MVP
+**Commit:** `998eff9`
 
-- [ ] Memory Service (SQLite WAL)
-- [ ] `memory.remember <name> [at <location>]`
-- [ ] `memory.recall <query>`
-- [ ] `memory.forget <name>`
-- [ ] `memory.list`
-- [ ] Location tracking with timestamps
+### Phase 2 — Task Plugin & Calendar ✅
 
-### Sprint 3 — Memory Panel
+- [x] `task_plugin` (6 commands: create, list, complete, cancel, update, calendar)
+- [x] Post-commit `TASK_CREATED/UPDATED/COMPLETED/CANCELLED` events
+- [x] Calendar queries (due_date vs overlap rules, no midnight spill)
+- [x] Config wiring (`config/task.yaml`, `config/default.yaml`)
+- [x] 80 tests
 
-- [ ] MemoryPanelWidget (PySide6)
-- [ ] Objects / Places / History tabs
-- [ ] Connected to Memory Service
-- [ ] F3 toggle shortcut
+**Commit:** `80baa78`
+
+### Phase 3 — JSON Import/Export ✅
+
+- [x] Canonical JSON adapter (stable hash, whitespace/order insensitive)
+- [x] File-level dedupe (content_hash) + per-item identical-content dedupe
+- [x] Conflict policies: `review` (default, parks in review_queue), `update` (writes IMPORTED history), `skip`
+- [x] Atomic batch transaction (items + review rows + import_batches row)
+- [x] Offset-aware datetime normalization; date-only preserved (no midnight)
+- [x] 53 tests
+
+**Commit:** `296c3c0`
+
+### R1 — Chronology Validation (mixed-offset) ✅
+
+- [x] Adapter compares instants (offset-aware), not raw strings
+- [x] Service mirrors same normalization-then-compare semantics
+- [x] Fixes false-reject of equal instants across offsets (e.g., 14:00+09:00 vs 12:00+07:00)
+- [x] 9 new regression tests
+
+**Commit:** `20faedc`
+
+### R6 — Reject date-only timestamps for timed tasks ✅
+
+- [x] Service rejects bare `YYYY-MM-DD` in `start_at`/`end_at` when `all_day=False`
+- [x] `all_day=True` still accepts date-only (no time inflation)
+- [x] 5 regression tests
+
+**Commit:** `a148439`
+
+### Phase 4 — Temporal Extraction (Draft) ⏳
+
+**Spec:** `docs/PHASE4_SPEC.md` (Draft, not approved for implementation)
+
+- [ ] Deterministic chat/long-paste extraction → `TaskItem` candidates
+- [ ] Low-confidence/ambiguous items → `internal_status=NEEDS_CONFIRMATION` + `review_queue`
+- [ ] Time-only (`"14:00"`) never auto-bound to a date; routed to review
+- [ ] Unsupported timezone names preserved in payload, not silently converted
+- [ ] Batch atomicity: one extraction text = one transaction
+- [ ] No external AI; deterministic rules only
 
 ---
 
-## UI Lifecycle — Desktop UX Foundation
+## Track B — Web Application (Planned)
+
+**Goal:** Web Task & Calendar Assistant (HTML/CSS/JS + PHP) using Track A engine via API.
+
+### MVP Scope
+
+- [ ] Web UI: Task list, Task creation, Calendar/Event view
+- [ ] Responsive: desktop + mobile browsers
+- [ ] PHP backend calling Track A Python services via HTTP API
+- [ ] Shared SQLite `data/tasks.db` (read/write via Python service)
+- [ ] No schema migration; Track A remains single writer
+- [ ] Auth: local-only for MVP (no multi-user production)
+
+### Architecture (high-level)
+
+```
+Browser (HTML/CSS/JS)
+       │
+       ▼
+PHP Web Backend
+       │
+       ▼ (HTTP API)
+Python FastAPI (Track A services)
+       │
+       ▼
+ScheduleService → SqliteScheduleRepository → data/tasks.db
+```
+
+### Out of Scope for MVP
+
+- Cloud deployment / public internet exposure
+- Native Android/iOS apps
+- Multi-user production auth
+- Rewriting Task/Calendar engine in PHP
+- Schema changes or DB migration without approved plan
+- Memory Core rewrite
+- External AI / LLM providers for extraction
+- Phase 4 implementation before spec approval
+
+---
+
+## UI Lifecycle — Desktop UX Foundation (unchanged)
 
 **Goal:** Aether behaves as a normal desktop application with opt-in background mode.
 
@@ -64,13 +130,6 @@ Hide ≠ Shutdown
 Quit = real graceful shutdown
 ```
 
-| Action | Result |
-|--------|--------|
-| Normal boot | UI visible, runtime active |
-| `--background` | UI hidden, runtime active |
-| Hide (button/tray/hotkey) | UI hidden, runtime active |
-| Quit (system.shutdown) | Real graceful shutdown |
-
 ### Execution Order
 
 ```
@@ -78,32 +137,12 @@ UI-0 → UI-1 → UI-3 → UI-4 → UI-2 → UI-5 → UI-6
 ```
 
 ### UI-0: Startup Visibility ✅
-
-**Commit:** `d73b82a` feat: add background startup mode
-**Tests:** 909 → 909 (18 UI-0 tests added)
-
-Scope:
-- [x] `gui.start_visible: true` default in config/default.yaml
-- [x] `ConfigLoader.set(dotted, value)` method
-- [x] `Application.boot(background=False)` param + override
-- [x] `app.py` + `__main__.py` `--background` CLI flag
-- [x] `setQuitOnLastWindowClosed(False)` stays
-- [x] UI visibility does NOT determine runtime lifecycle
+**Commit:** `d73b82a` | Tests: 909 → 909 (18 UI-0 tests added)
 
 ### UI-1: Runtime Control ✅
-
-**Commit:** `dfd5d36` feat: add UI-1 shell show/hide API
-**Tests:** 909 → 921 (12 UI-1 tests added)
-
-Scope:
-- [x] `UIShell.show()`, `hide()`, `toggle()`, `is_visible`
-- [x] `GUIPlugin.show_ui()`, `hide_ui()`, `toggle_ui()`, `is_ui_visible()`
-- [x] `ui.shell.show`, `ui.shell.hide`, `ui.shell.toggle`, `ui.shell.is_visible` commands
-- [x] `CommandInfo` entries for palette discovery
-- [x] Integration with `gui_plugin.py` rewrite (UIShell composition root)
+**Commit:** `dfd5d36` | Tests: 909 → 921 (12 UI-1 tests added)
 
 ### UI-2: Global Hotkey 🔄 (planned)
-
 **Plan:** `docs/UI-2-plan.md`
 
 Scope (locked):
@@ -115,26 +154,22 @@ Scope (locked):
 NOT in scope: system tray, window −/×, Alt+F4, persistence, shutdown, UI redesign, panel changes.
 
 ### UI-3: Window Controls (planned)
-
 - [ ] Custom `−` (hide) and `×` (quit) buttons
 - [ ] Frameless `Qt.Tool` window
 - [ ] `−` → `GUIPlugin.hide_ui()` → `UIShell.hide()`
 - [ ] `×` → `system.shutdown` → `app.request_shutdown()`
 
 ### UI-4: System Tray (planned)
-
 - [ ] QSystemTrayIcon with context menu
 - [ ] Show / Hide / Quit actions
 - [ ] Tray → Hide → `GUIPlugin.hide_ui()`
 
 ### UI-5: Persistence (planned)
-
 - [ ] `data/ui_state.json` (git-ignored)
 - [ ] Save/restore window position, visibility
 - [ ] Auto-save on shutdown
 
 ### UI-6: Polish & Edge Cases (planned)
-
 - [ ] Alt+F4 → `system.shutdown` (not hide)
 - [ ] Taskbar behavior
 - [ ] Multi-monitor support
@@ -142,64 +177,10 @@ NOT in scope: system tray, window −/×, Alt+F4, persistence, shutdown, UI rede
 
 ---
 
-## Phase 3B — Ollama Integration
-
-**Goal:** Natural language → Command via local LLM.
-
-- [ ] `OllamaIntentResolver` implementing `IIntentResolver`
-- [ ] Prompt templates for Aether commands
-- [ ] Fallback to RuleEngine when Ollama unavailable
-- [ ] Configurable model selection
-
----
-
-## Phase 3C — AI Chat
-
-**Goal:** Conversational interface for Aether.
-
-- [ ] ChatPanelWidget (PySide6)
-- [ ] Chat history with context
-- [ ] Multi-turn conversations
-- [ ] Voice input integration
-
----
-
-## Phase 4 — Workflow Engine
-
-**Goal:** Automate multi-step tasks.
-
-- [ ] Workflow definition (YAML/JSON)
-- [ ] Step executor with conditionals
-- [ ] Loop/retry support
-- [ ] Integration with memory + vision
-
----
-
-## Phase 5 — Desktop Automation
-
-**Goal:** Control desktop applications via gestures/voice.
-
-- [ ] pywinauto integration
-- [ ] Window management commands
-- [ ] Application launching
-- [ ] Keyboard/mouse simulation
-
----
-
-## Phase 6 — XR Interface
-
-**Goal:** Port to smart glasses.
-
-- [ ] OpenXR integration
-- [ ] Spatial UI rendering
-- [ ] Hand tracking in 3D space
-- [ ] Voice-first interaction
-
----
-
 ## Design Principles (Post-v1)
 
 1. **Every commit adds user-facing capability** — no more infrastructure-only changes
 2. **Backend v1 is frozen** — fix only bugs or security issues
-3. **Feature-first** — Memory → AI → Automation → XR
-4. **Test everything** — 921+ tests, run before every commit
+3. **Two-track delivery** — Track A (Schedule Engine) stabilizes first; Track B (Web) consumes it
+4. **Test everything** — 1,349+ tests, run before every commit
+5. **No external AI egress** — provider stays `echo`; deterministic rules only

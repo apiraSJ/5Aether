@@ -1,8 +1,11 @@
-# Aether AI Assistant Development Golden Baseline
+# Aether AI Assistant Development — Historical Baseline (2026-09-21)
 
-This document records the baseline state of the Aether repository before beginning the AI Assistant Core integration.
+> **This document is a historical snapshot** recorded before the Mark-1 Schedule Engine
+> development began. It documents the state of the repository at commit `dfd5d36`
+> (Sep 21, 2026) for reference. The current baseline is in `AI_ASSISTANT_BASELINE_CURRENT.md`.
 
-## Baseline Metrics
+## Baseline Metrics (Historical)
+
 - **State Statement**: 691 tests passing before AI Assistant development.
 - **Pytest Command**: `.venv\Scripts\python -m pytest`
 - **Python Version**: `Python 3.12.9`
@@ -14,14 +17,14 @@ This document records the baseline state of the Aether repository before beginni
 
 ---
 
-## Current Status (UI Lifecycle)
+## Current Status at Snapshot (Historical)
 
 - **Test Count**: `921`
 - **Passing Count**: `921`
 - **Failing Count**: `0`
 - **Latest Commit**: `dfd5d36` feat: add UI-1 shell show/hide API
 
-### Commit History
+### Commit History at Snapshot
 
 ```
 dfd5d36 feat: add UI-1 shell show/hide API       (921 tests)
@@ -33,7 +36,8 @@ f363b5c feat: Phase 3.3 Intent Reasoning
 
 ---
 
-## Git State
+## Git State at Snapshot
+
 - **Current Branch**: `main`
 - **Current Commit**: `dfd5d3600db0019dc04f0d8b3ed8e75922fd8a60`
 - **Commit Date**: `Mon Sep 21 11:12:56 2026 +0700`
@@ -45,6 +49,7 @@ f363b5c feat: Phase 3.3 Intent Reasoning
 ---
 
 ## Frozen Vision / Computer Vision Boundaries
+
 The following Computer Vision components, entry points, and pipelines are frozen:
 
 1. **Camera Interface**:
@@ -60,3 +65,19 @@ The following Computer Vision components, entry points, and pipelines are frozen
    - `aether/core/virtual_cursor.py`
 5. **Perception and Event Adapters**:
    - `aether/vision/` (all files: `plugins.py`, `event_adapter.py`, `state_builder.py`, `tracker.py`, `vision_state.py`)
+
+---
+
+## Notes
+
+This baseline captures the state **before** Mark-1 Schedule Engine development (Phases 1-3)
+and **before** the two-track Mark-1 plan (Track A = Schedule Engine, Track B = Web).
+The current repository state has diverged significantly:
+
+- Mark-1 Track A (Schedule Engine) Phases 1-3 + R1/R6 complete
+- Test count: 1,349 (was 921)
+- New components: `aether/task/`, `aether/plugins/task_plugin.py`, `config/task.yaml`
+- Mark-1 Track B (Web) planned but not started
+- Phase 4 Temporal Extraction spec exists as Draft (`docs/PHASE4_SPEC.md`)
+
+See `AI_ASSISTANT_BASELINE_CURRENT.md` for the current baseline.

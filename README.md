@@ -1,23 +1,26 @@
 ```
-     _    ____   ____ _   _ _____ _   _ ______  __
-    / \  |  _ \ / ___| | | | ____| \ | | __ \ \ / /
-   / _ \ | |_) | |   | |_| |  _| |  \| |  _ \\ V /
-  / ___ \|  _ <| |___|  _  | |___| |\  | |_) || |
- /_/   \_\_| \_\\____|_| |_|_____|_| \_|____/ |_|
+    _    ____   ____ _   _ _____ _   _ ______  __
+   / \  |  _ \ / ___| | | | ____| \ | | __ \ \ / /
+  / _ \ | |_) | |   | |_| |  _| |  \| |  _ \\ V /
+ / ___ \|  _ <| |___|  _  | |___| |\  | |_) || |
+/_/   \_\_| \_\\____|_| |_|_____|_| \_|____/ |_|
 ```
 
 > Spatial Intelligence AI — Built for desktop today, architected for XR tomorrow.
+> **Mark-1: Web Task & Calendar Assistant** — Track A (Python Schedule Engine) + Track B (Web UI)
 
 Aether is a command-driven AI Spatial Assistant with a plugin-based runtime, event-driven architecture, and vision pipeline. Boot → Tick → Shutdown lifecycle, 70+ event types, config-driven plugins, and a vision pipeline targeting ≤120ms E2E latency.
 
 **Backend v1.0.0** — Architecture Stable (tagged `backend-v1.0.0`)
 **UI Lifecycle** — UI-0 through UI-1 complete, UI-2 in progress
+**Mark-1 Track A (Schedule Engine)** — Phases 1-3 + R1/R6 complete, **1,349 tests passing** (commit `a148439`)
+**Mark-1 Track B (Web Application)** — Planned (HTML/CSS/JS + PHP, consuming Track A via API)
 
 ---
 
 ## Quick Start
 
-### Windows (one-click)
+### Windows (one-click) — Desktop Vision Mode
 
 ```bat
 git clone <repo-url> Aether
@@ -26,7 +29,7 @@ scripts\setup.bat       # creates venv + installs everything
 scripts\start.bat       # launches Aether in vision mode
 ```
 
-### Any platform
+### Any Platform — Desktop
 
 ```bash
 git clone <repo-url> Aether
@@ -37,7 +40,7 @@ pip install -e ".[full]"            # install with all extras
 python -m aether --mode vision      # launch with camera + GUI
 ```
 
-### Run modes
+### Run Modes (Desktop)
 
 ```bash
 python -m aether --mode vision       # Full vision pipeline + GUI overlay
@@ -55,12 +58,35 @@ scripts\profile.bat 30       # 30-second hardware validation
 ### Tests
 
 ```bash
-python -m pytest tests/ -v           # All 921 tests
+python -m pytest tests/ -v           # All 1,349 tests
 ```
 
 ---
 
-## UI Lifecycle
+## Mark-1 Track B — Web (Planned)
+
+**Not yet implemented.** This section describes the planned Web track.
+
+### Planned Quick Start (Web)
+
+```bash
+# After Web track implementation:
+# 1. Start Python API service (FastAPI wrapping ScheduleService)
+# 2. Start PHP development server
+# 3. Open http://localhost:XXXX in browser
+```
+
+### Planned Web Features
+
+- Task list, creation, editing, completion
+- Calendar/Event view (day/week/month)
+- Responsive: desktop + mobile browsers
+- Review queue UI for extraction uncertainty and import conflicts
+- Shared `data/tasks.db` with Track A (Python remains sole writer)
+
+---
+
+## UI Lifecycle (Desktop)
 
 ### Boot Modes
 
@@ -98,15 +124,15 @@ Quit = real graceful shutdown
 
 ```text
 Camera ──▶ FrameBroker ──▶ YOLO / MediaPipe ──▶ PerceptionResult
-                                                       │
-                                                       ▼
-                                               VisionEventAdapter
-                                                       │
-                                                       ▼
-                                                  EventBus (queued)
-                                                       │
-                                                       ▼
-                                              OverlayController ──▶ OverlayModel ──▶ Widgets
+                                                        │
+                                                        ▼
+                                                VisionEventAdapter
+                                                        │
+                                                        ▼
+                                                   EventBus (queued)
+                                                        │
+                                                        ▼
+                                               OverlayController ──▶ OverlayModel ──▶ Widgets
 ```
 
 ### Core Systems
@@ -146,6 +172,60 @@ Camera ──▶ FrameBroker ──▶ YOLO / MediaPipe ──▶ PerceptionResu
 
 ---
 
+## Mark-1 Track A — Schedule Engine (Implemented)
+
+### Components
+
+| Component | Location | Responsibility |
+|-----------|----------|----------------|
+| **Models** | `aether/task/models.py` | `TaskItem`, `Evidence`, `HistoryEntry`, `ReviewEntry`, `ImportBatch`, enums, datetime normalization, timezone registry |
+| **Schema** | `aether/task/schema.py` | SQLite DDL: `items`, `evidence`, `item_history`, `review_queue`, `import_batches` |
+| **Migrations** | `aether/task/migrations.py` | Append-only `user_version` migrations |
+| **Repository** | `aether/task/repository.py` | `SqliteScheduleRepository` implementing `IScheduleRepository` |
+| **Service** | `aether/task/service.py` | `ScheduleService` — validated CRUD, optimistic concurrency, audit history |
+| **Calendar Queries** | `aether/task/calendar_query.py` | Day/week/month views, overlap detection |
+| **JSON Adapter** | `aether/task/json_adapter.py` | Canonical import/export, dedupe, conflict policies |
+| **Plugin** | `aether/plugins/task_plugin.py` | CLI commands + `TASK_*` events |
+
+### Data Model Invariants (Locked)
+
+- **Single table** `items` with `kind` (`task` | `event`)
+- **Task:** `due_date` optional date-only; `all_day` forbidden
+- **Event:** `start_at` required; `all_day=True` keeps date-only (no midnight); `due_date` forbidden
+- **Date-only** never becomes midnight; only allowed with `all_day=True`
+- **Offset-aware datetimes** preserved; naive gain item tz at write boundary
+- **Review queue** — unique pending row per item; `NEEDS_CONFIRMATION` + `PENDING` = uncertainty
+- **Import batches** — canonical SHA-256 content hash for file-level dedupe
+- **History** — append-only, survives deletion
+
+### Validation Rules (Locked)
+
+- **R1 (Chronology):** Compare instants, not raw strings. Naive → item tz; aware preserved.
+- **R6 (Date-only):** Bare `YYYY-MM-DD` in `start_at`/`end_at` rejected when `all_day=False`.
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `task.create` | Create task or event |
+| `task.list` | List items (filter by kind, status) |
+| `task.complete` | Complete a pending task |
+| `task.cancel` | Cancel a pending task or event |
+| `task.update` | Update fields (optimistic concurrency) |
+| `task.calendar` | Day/week/month views |
+| `task.export` | Export items to canonical JSON |
+| `task.import` | Import JSON (review/update/skip) |
+
+### Configuration
+
+```yaml
+# config/task.yaml
+task:
+  db_path: "data/tasks.db"
+```
+
+---
+
 ## Project Structure
 
 ```text
@@ -175,7 +255,8 @@ Aether/
 │   │   ├── intent_resolver_plugin.py  # Event-driven intent resolution
 │   │   ├── result_formatter_plugin.py # Colored CLI output
 │   │   ├── gui_plugin.py          # GUIPlugin — UIShell lifecycle, hotkey
-│   │   └── memory_plugin.py       # Memory CRUD commands
+│   │   ├── memory_plugin.py       # Memory CRUD commands
+│   │   └── task_plugin.py         # Task/Calendar CLI + events
 │   ├── vision/                    # Vision pipeline
 │   │   └── plugins.py             # VisionAdapterPlugin (state → events)
 │   ├── phase_b/                   # Legacy bridge (CommandExecutor)
@@ -197,18 +278,32 @@ Aether/
 │   │   ├── status_widget.py       # System status display
 │   │   ├── timeline_widget.py     # Event timeline
 │   │   └── hud_manager.py         # Multi-layer throttle scheduler
+│   ├── task/                      # Mark-1 Schedule Engine (Track A)
+│   │   ├── models.py              # TaskItem, Evidence, HistoryEntry, ReviewEntry, ImportBatch
+│   │   ├── schema.py              # SQLite DDL
+│   │   ├── migrations.py          # user_version migrations
+│   │   ├── repository.py          # SqliteScheduleRepository
+│   │   ├── service.py             # ScheduleService
+│   │   ├── calendar_query.py      # Calendar views (pure functions)
+│   │   ├── json_adapter.py        # Canonical JSON import/export
+│   │   └── __init__.py            # Exports
 │   ├── memory/                    # Memory service
 │   │   └── memory_service.py      # SQLite (WAL) persistence
 │   └── config/                    # Config loader
 ├── config/
-│   └── vision.yaml                # Plugin load order + settings
+│   ├── default.yaml               # Base config
+│   ├── vision.yaml                # Vision plugin load order + settings
+│   └── task.yaml                  # Task/Calendar config
 ├── scripts/
 │   ├── setup.bat                  # One-click setup
 │   ├── start.bat                  # Launch Aether
 │   ├── tick.bat                   # Tick mode launcher
 │   └── profile.bat                # Performance profiler
 ├── models/                        # ML weights (gitignored)
-├── tests/                         # 921 tests
+├── data/                          # Runtime data (gitignored)
+│   ├── memory.db                  # Memory Core SQLite
+│   └── tasks.db                   # Mark-1 Schedule SQLite (gitignored)
+├── tests/                         # 1,349 tests
 ├── pyproject.toml
 └── main.py                        # Legacy entry point
 ```
@@ -230,9 +325,16 @@ Aether/
 
 ## Configuration
 
-All settings in `config/vision.yaml`:
+All settings in `config/vision.yaml` and `config/task.yaml`:
 
 ```yaml
+# config/task.yaml
+task:
+  db_path: "data/tasks.db"
+```
+
+```yaml
+# config/vision.yaml (excerpt)
 app:
   name: "Aether"
   version: "1.0.0"
@@ -250,12 +352,14 @@ plugins:
     class: "SystemPlugin"
   - module: "aether.plugins.gui_plugin"
     class: "GUIPlugin"
+  - module: "aether.plugins.task_plugin"
+    class: "TaskPlugin"
   # ... (see full config for all plugins)
 ```
 
 ---
 
-## Gesture Reference
+## Gesture Reference (Desktop)
 
 | Gesture | Command | Description |
 |---------|---------|-------------|
@@ -273,9 +377,10 @@ plugins:
 ## Testing
 
 ```bash
-python -m pytest tests/ -v           # All 921 tests
-python -m pytest tests/test_ui_lifecycle.py -v  # UI lifecycle tests (30)
+python -m pytest tests/ -v           # All 1,349 tests
+python -m pytest tests/test_ui_lifecycle.py -v  # UI lifecycle tests
 python -m pytest tests/test_cli_system.py -v    # CLI + intent tests
+python -m pytest tests/test_task_*.py -v        # Mark-1 Track A tests
 ```
 
 ---
@@ -284,11 +389,13 @@ python -m pytest tests/test_cli_system.py -v    # CLI + intent tests
 
 | File | Contents |
 |------|----------|
-| `docs/ARCHITECTURE.md` | System architecture reference |
-| `docs/ROADMAP.md` | Development roadmap |
+| `docs/ARCHITECTURE.md` | System architecture reference (incl. Schedule Engine + Web Integration) |
+| `docs/ROADMAP.md` | Development roadmap (Track A + Track B) |
 | `docs/UI-2-plan.md` | UI-2 Global Hotkey implementation plan |
 | `docs/workspace.md` | Workspace + Layout system |
-| `docs/AI_ASSISTANT_BASELINE.md` | Baseline state before AI integration |
+| `docs/REVIEW_AUDIT.md` | Mark-1 Phase 0 review audit |
+| `docs/PHASE4_SPEC.md` | Phase 4 Temporal Extraction spec (Draft) |
+| `docs/AI_ASSISTANT_BASELINE.md` | Historical baseline (Sep 2026) |
 
 ---
 
@@ -311,6 +418,8 @@ python -m pytest tests/test_cli_system.py -v    # CLI + intent tests
 4. **Plugins Never Communicate** — EventBus only. No direct plugin-to-plugin calls.
 5. **Thread-Safe** — FrameBroker, EventBus, CommandBus all use locks/queues.
 6. **Config-Driven** — Scheduler debug, plugin load order, hardware budgets all in YAML.
+7. **Two-Track Delivery** — Track A (Schedule Engine) stabilizes first; Track B (Web) consumes it.
+8. **No External AI Egress** — Provider stays `echo`; deterministic rules only.
 
 ---
 
