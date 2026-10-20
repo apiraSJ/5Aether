@@ -70,8 +70,6 @@ def create_app(
     register_exception_handlers(app)
 
     # Add security middleware (local-only access)
-    from aether.api.middleware import add_security_middleware
-
     add_security_middleware(app)
 
     # Include routers with /api/v1 prefix
