@@ -1,0 +1,28 @@
+# Aether Mark-1 Web Mode Configuration (Track B)
+# Used by: python -m aether --mode web
+#
+# Minimal plugin set for the local-only web prototype: the Schedule Engine's
+# TaskPlugin only. No GUI, vision, camera, AI, or Memory Core plugins —
+# locked Mark 1 scope (Track A engine reused as-is, Track B serves HTTP).
+
+app:
+  name: "Aether"
+  version: "1.0.0"
+  mode: "web"
+
+logging:
+  level: "INFO"
+  console: true
+  file: "logs/aether.log"
+
+event_bus:
+  queued: true
+
+plugins:
+  # ── Mark 1 Task & Calendar (data/tasks.db, source of truth) ───────
+  - module: "aether.plugins.task_plugin"
+    class: "TaskPlugin"
+
+task:
+  # Database path (relative to project root)
+  db_path: "data/tasks.db"

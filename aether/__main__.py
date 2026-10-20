@@ -6,6 +6,7 @@ Usage:
     python -m aether                    # Phase A: headless boot proof
     python -m aether --mode tick        # Phase B: 30Hz tick loop
     python -m aether --mode headless    # Same as default
+    python -m aether --mode web         # Mark-1 web API + UI (127.0.0.1:8765)
     python -m aether --mode vision      # Vision pipeline (camera + hands + objects)
     python -m aether --mode vision --profile --duration 30   # Profile for 30s then print report
     python -m aether --config config/vision.yaml
@@ -24,6 +25,7 @@ from typing import Optional
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = PROJECT_ROOT / "config" / "default.yaml"
 VISION_CONFIG = PROJECT_ROOT / "config" / "vision.yaml"
+WEB_CONFIG = PROJECT_ROOT / "config" / "web.yaml"
 
 BANNER = r"""
    ___    __      __  ___          __
@@ -48,12 +50,13 @@ examples:
   python -m aether --mode tick        30Hz tick loop with plugins
   python -m aether --mode headless    same as default (no tick loop)
   python -m aether --mode vision      camera + hand tracking + object detection
+  python -m aether --mode web         Mark-1 web API + UI on 127.0.0.1:8765
   python -m aether --config config/archive/desktop.yaml
   python -m aether --strict-plugins"""
     )
     parser.add_argument(
         "--mode",
-        choices=["headless", "tick", "vision"],
+        choices=["headless", "tick", "web", "vision"],
         default="headless",
         help="run mode (default: headless)"
     )
@@ -215,6 +218,10 @@ def main(argv: Optional[list] = None) -> int:
     if args.mode == "vision" and args.config is None:
         config_path = str(VISION_CONFIG)
         print(f"  [auto] Using vision config: {VISION_CONFIG.name}")
+    # Auto-select web config for web mode (minimal plugin set, no GUI/AI)
+    elif args.mode == "web" and args.config is None:
+        config_path = str(WEB_CONFIG)
+        print(f"  [auto] Using web config: {WEB_CONFIG.name}")
     else:
         config_path = _resolve_config(args.config)
 
@@ -238,6 +245,9 @@ def main(argv: Optional[list] = None) -> int:
             print(f"[Aether] FATAL: {exc}", file=sys.stderr)
             logging.getLogger("Aether.Main").critical("Boot failed: %s", exc)
             return 1
+        if args.mode == "web":
+            from aether.api.server import run as run_web
+            return run_web(app)
         return _run_headless(app)
 
 
