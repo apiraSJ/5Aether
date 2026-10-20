@@ -31,19 +31,8 @@ def client(app):
     return TestClient(app, base_url="http://localhost")
 
 
-@pytest.fixture
-def wired_client(tmp_path):
-    """Test client wired to a real ScheduleService backed by a temp database."""
-    from aether.task.repository import SqliteScheduleRepository
-    from aether.task.service import ScheduleService
-
-    repo = SqliteScheduleRepository(str(tmp_path / "tasks.db"))
-    repo.open()
-    container = ServiceContainer()
-    container.register_instance("schedule_service", ScheduleService(repo))
-    wired_app = create_app(container=container)
-    yield TestClient(wired_app, base_url="http://localhost")
-    repo.close()
+# The ``wired_client`` fixture (real ScheduleService + temp database)
+# lives in tests/conftest.py so every API test module can reuse it.
 
 
 class TestHealthEndpoint:
@@ -69,18 +58,34 @@ class TestHealthEndpoint:
 
 
 class TestRootEndpoint:
-    """Tests for the root endpoint."""
+    """Tests for the root endpoint.
 
-    def test_root_exists(self, client: TestClient):
-        """Root endpoint should exist."""
+    P1 intentional behavior change (approved): "/" serves the Mark-1
+    Prototype page (web/index.html) instead of the skeleton's JSON links.
+    """
+
+    def test_root_serves_html_page(self, client: TestClient):
+        """Root returns the web UI, not JSON."""
         response = client.get("/")
         assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
+        assert "Aether Mark-1" in response.text
 
-    def test_root_contains_links(self, client: TestClient):
-        """Root should contain links to docs and health."""
-        data = client.get("/").json()
-        assert "docs" in data
-        assert "health" in data
+    def test_static_assets_served(self, client: TestClient):
+        """Frontend assets are served from the same origin under /static."""
+        css = client.get("/static/styles.css")
+        assert css.status_code == 200
+        assert "text/css" in css.headers["content-type"]
+
+        js = client.get("/static/app.js")
+        assert js.status_code == 200
+        assert "javascript" in js.headers["content-type"]
+
+    def test_health_still_reachable_from_ui(self, client: TestClient):
+        """The static mount must not shadow /health."""
+        response = client.get("/health")
+        assert response.status_code == 200
+        assert response.json()["status"] == "ok"
 
 
 class TestSecurityMiddleware:

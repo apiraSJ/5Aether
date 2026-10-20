@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aether Mark-1 — Tasks</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <h1>Aether Mark-1</h1>
+    <p class="subtitle">Task &amp; Calendar Assistant</p>
+  </header>
+
+  <main>
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Tasks</h2>
+        <button id="refresh-btn" type="button">Refresh</button>
+      </div>
+
+      <div id="error-banner" class="error-banner" hidden></div>
+
+      <table id="task-table" class="task-table" hidden>
+        <thead>
+          <tr>
+            <th>Title</th>
+            <th>Due / Start</th>
+            <th>Kind</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="task-list"></tbody>
+      </table>
+
+      <p id="empty-state" class="muted" hidden>No tasks yet.</p>
+      <p id="loading-state" class="muted">Loading…</p>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <a href="/health">health</a> · <a href="/docs">api docs</a>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

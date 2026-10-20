@@ -11,16 +11,21 @@ Creates and configures the FastAPI application with:
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from aether.api.errors import register_exception_handlers
 from aether.api.middleware import add_security_middleware
 from aether.api.routes import calendar, tasks
 from aether.api.schemas import HealthResponse
 from aether.core.service_container import ServiceContainer
+
+# Project-root /web — resolved from this file so it works from any CWD.
+WEB_DIR = Path(__file__).resolve().parent.parent.parent / "web"
 
 
 @asynccontextmanager
@@ -81,14 +86,15 @@ def create_app(
     async def health_check() -> dict:
         return {"status": "ok", "service": "aether-api", "version": "1.0.0"}
 
-    # Root endpoint
+    # Web UI (P1). The Prototype page lives at "/", assets under "/static".
+    # Added after the API routes so /api/v1 always wins, and unknown paths
+    # on any method still fall through to the Contract's 404 JSON shape
+    # (a catch-all mount at "/" would answer 405 for non-GET requests).
+    # Intentional behavior change: root returns HTML instead of JSON links.
     @app.get("/", include_in_schema=False)
-    async def root() -> dict:
-        return {
-            "service": "aether-api",
-            "version": "1.0.0",
-            "docs": "/docs",
-            "health": "/health",
-        }
+    async def index() -> FileResponse:
+        return FileResponse(WEB_DIR / "index.html")
+
+    app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")
 
     return app

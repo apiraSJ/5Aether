@@ -1,0 +1,107 @@
+/* Aether Mark-1 — minimal hand-written styles (no framework, no build). */
+
+:root {
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --text: #1c2430;
+  --muted: #6b7684;
+  --line: #e3e7ec;
+  --accent: #2f6feb;
+  --ok: #1f9d55;
+  --warn: #b7791f;
+  --bad: #c53030;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.site-header {
+  padding: 24px 32px 8px;
+}
+.site-header h1 { margin: 0; font-size: 22px; }
+.subtitle { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
+
+main { padding: 16px 32px; }
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px 20px;
+  max-width: 880px;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.panel-head h2 { margin: 0; font-size: 17px; }
+
+button {
+  font: inherit;
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  cursor: pointer;
+}
+button:hover { border-color: var(--accent); color: var(--accent); }
+
+.task-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.task-table th,
+.task-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.task-table th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+.badge-pending   { background: #fff3e0; color: var(--warn); }
+.badge-completed { background: #e6f6ec; color: var(--ok); }
+.badge-cancelled { background: #fdecec; color: var(--bad); }
+
+.muted { color: var(--muted); font-size: 14px; }
+
+.error-banner {
+  background: #fdecec;
+  color: var(--bad);
+  border: 1px solid #f5c2c2;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  font-size: 14px;
+}
+
+.site-footer {
+  padding: 12px 32px 24px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.site-footer a { color: var(--accent); }
