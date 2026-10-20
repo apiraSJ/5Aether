@@ -13,6 +13,12 @@
   </header>
 
   <main>
+    <nav class="tabs" aria-label="Views">
+      <button type="button" id="tab-list" class="tab active">List</button>
+      <button type="button" id="tab-calendar" class="tab">Calendar</button>
+    </nav>
+
+    <div id="list-view">
     <section class="panel">
       <div class="panel-head">
         <h2 id="form-title">New task</h2>
@@ -97,6 +103,32 @@
       <p id="empty-state" class="muted" hidden>No tasks yet.</p>
       <p id="loading-state" class="muted">Loading…</p>
     </section>
+    </div>
+
+    <div id="calendar-view" hidden>
+      <section class="panel">
+        <div class="panel-head cal-head">
+          <button id="cal-prev" type="button" aria-label="Previous month">◀</button>
+          <h2 id="cal-label">Month</h2>
+          <div class="cal-head-right">
+            <button id="cal-today" type="button">Today</button>
+            <button id="cal-next" type="button" aria-label="Next month">▶</button>
+          </div>
+        </div>
+
+        <div id="list-error-cal" class="error-banner" hidden></div>
+
+        <div id="cal-grid" class="cal-grid" aria-label="Month grid"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2 id="cal-day-label">Pick a day</h2>
+        </div>
+        <ul id="cal-day-items" class="cal-day-items"></ul>
+        <p id="cal-day-empty" class="muted" hidden>No items on this day.</p>
+      </section>
+    </div>
   </main>
 
   <footer class="site-footer">

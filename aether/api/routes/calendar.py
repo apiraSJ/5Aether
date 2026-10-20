@@ -1,12 +1,13 @@
 """Calendar query endpoints for Aether API.
 
 Implements Day/Week/Month calendar views per API Contract v1.1.
-All views use calendar_query pure functions over TaskItem lists.
+Thin adapter: the ScheduleEngine's calendar_query pure functions do the
+date/status work and its own ``views_to_dicts`` serializer produces the
+payload — the API layer only wires HTTP to them. Calendar views show ALL
+statuses (pending, completed, cancelled) — no status filtering here.
 """
 
 from __future__ import annotations
-
-from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 
@@ -28,21 +29,15 @@ async def calendar_day(
     date: str = Query(..., pattern=r"^\d{4}-\d{2}-\d{2}$"),
     service: "ScheduleService" = Depends(get_schedule_service),
 ) -> CalendarDayResponse:
-    """Get calendar view for a single day.
+    """Items visible on one date.
 
-    Returns events and tasks visible on the given date.
     Follows calendar_query.day_view semantics:
     - Tasks appear only on their due_date
     - Events appear on every day their date range covers
     - Shows pending, completed, and cancelled items (no status filtering)
     """
-    items = service.list()
-    view = calendar_query.day_view(items, date)
-    return CalendarDayResponse(
-        date=view["date"],
-        events=[{"id": i.id, "kind": i.kind.value, "title": i.title, "start_at": i.start_at, "end_at": i.end_at, "all_day": i.all_day} for i in view["events"]],
-        tasks=[{"id": i.id, "kind": i.kind.value, "title": i.title, "due_date": i.due_date} for i in view["tasks"]],
-    )
+    view = calendar_query.day_view(service.list(), date)
+    return CalendarDayResponse(**calendar_query.views_to_dicts(view))
 
 
 @router.get("/week", response_model=CalendarWeekResponse)
@@ -50,25 +45,9 @@ async def calendar_week(
     date: str = Query(..., pattern=r"^\d{4}-\d{2}-\d{2}$"),
     service: "ScheduleService" = Depends(get_schedule_service),
 ) -> CalendarWeekResponse:
-    """Get calendar view for a 7-day week starting from Monday.
-
-    The given date is snapped to its ISO week's Monday.
-    Returns 7 days of calendar views.
-    """
-    items = service.list()
+    """7 days starting from the Monday of ``date``'s ISO week."""
     view = calendar_query.week_view(service.list(), date)
-    return CalendarWeekResponse(
-        start_date=view["start_date"],
-        end_date=view["end_date"],
-        days=[
-            CalendarDayResponse(
-                date=d["date"],
-                events=[{"id": i.id, "kind": i.kind.value, "title": i.title, "start_at": i.start_at, "end_at": i.end_at, "all_day": i.all_day} for i in d["events"]],
-                tasks=[{"id": i.id, "kind": i.kind.value, "title": i.title, "due_date": i.due_date} for i in d["tasks"]],
-            )
-            for d in view["days"]
-        ],
-    )
+    return CalendarWeekResponse(**calendar_query.views_to_dicts(view))
 
 
 @router.get("/month", response_model=CalendarMonthResponse)
@@ -77,22 +56,6 @@ async def calendar_month(
     month: int = Query(..., ge=1, le=12),
     service: "ScheduleService" = Depends(get_schedule_service),
 ) -> CalendarMonthResponse:
-    """Get calendar view for a full month.
-
-    Returns all days of the month with first_weekday (0=Monday).
-    """
-    items = service.list()
-    view = calendar_query.month_view(items, year, month)
-    return CalendarMonthResponse(
-        year=view["year"],
-        month=view["month"],
-        first_weekday=view["first_weekday"],
-        days=[
-            CalendarDayResponse(
-                date=d["date"],
-                events=[{"id": i.id, "kind": i.kind.value, "title": i.title, "start_at": i.start_at, "end_at": i.end_at, "all_day": i.all_day} for i in d["events"]],
-                tasks=[{"id": i.id, "kind": i.kind.value, "title": i.title, "due_date": i.due_date} for i in d["tasks"]],
-            )
-            for d in view["days"]
-        ],
-    )
+    """Every day of the month plus grid metadata (first_weekday, 0=Monday)."""
+    view = calendar_query.month_view(service.list(), year, month)
+    return CalendarMonthResponse(**calendar_query.views_to_dicts(view))

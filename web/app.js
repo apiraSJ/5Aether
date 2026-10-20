@@ -299,3 +299,170 @@ document.addEventListener("DOMContentLoaded", () => {
   toggleKindFields();
   loadTasks();
 });
+
+// ── calendar view (P4) ─────────────────────────────────────────────
+
+const cal = {
+  tabList: document.getElementById("tab-list"),
+  tabCalendar: document.getElementById("tab-calendar"),
+  listView: document.getElementById("list-view"),
+  calendarView: document.getElementById("calendar-view"),
+  label: document.getElementById("cal-label"),
+  grid: document.getElementById("cal-grid"),
+  prev: document.getElementById("cal-prev"),
+  next: document.getElementById("cal-next"),
+  today: document.getElementById("cal-today"),
+  dayLabel: document.getElementById("cal-day-label"),
+  dayItems: document.getElementById("cal-day-items"),
+  dayEmpty: document.getElementById("cal-day-empty"),
+  error: document.getElementById("list-error-cal"),
+};
+
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+let calYear = null;
+let calMonth = null; // 1-12
+let selectedDate = null;
+
+function isoDate(d) {
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+function showView(name) {
+  const isList = name === "list";
+  cal.listView.hidden = !isList;
+  cal.calendarView.hidden = isList;
+  cal.tabList.classList.toggle("active", isList);
+  cal.tabCalendar.classList.toggle("active", !isList);
+  if (!isList && calYear === null) {
+    const now = new Date();
+    loadMonth(now.getFullYear(), now.getMonth() + 1, isoDate(now));
+  }
+}
+
+async function fetchJson(url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, `HTTP ${response.status}`));
+  }
+  return response.json();
+}
+
+function itemChip(item, timeLabel) {
+  const li = document.createElement("li");
+  li.className = "cal-item";
+  const badge = document.createElement("span");
+  badge.className = `badge badge-${item.status}`;
+  badge.textContent = item.status;
+  const title = document.createElement("span");
+  title.className = "cal-item-title";
+  title.textContent = item.title;
+  const time = document.createElement("span");
+  time.className = "cal-item-time muted";
+  time.textContent = timeLabel || "";
+  li.append(badge, title, time);
+  return li;
+}
+
+async function loadDay(dateStr) {
+  selectedDate = dateStr;
+  cal.dayLabel.textContent = dateStr;
+  cal.dayItems.replaceChildren();
+  cal.dayEmpty.hidden = true;
+  try {
+    // Engine semantics: tasks on due_date, events across covered days,
+    // all statuses shown.
+    const view = await fetchJson(`${API}/calendar/day?date=${dateStr}`);
+    const rows = [
+      ...view.events.map((e) => itemChip(e, e.start_at ? e.start_at.slice(11, 16) : "all-day")),
+      ...view.tasks.map((t) => itemChip(t, t.due_date || "")),
+    ];
+    for (const row of rows) cal.dayItems.appendChild(row);
+    cal.dayEmpty.hidden = rows.length > 0;
+    highlightSelectedDay();
+  } catch (err) {
+    showCalendarError(`Could not load day: ${err.message}`);
+  }
+}
+
+function highlightSelectedDay() {
+  for (const cell of cal.grid.querySelectorAll(".cal-cell[data-date]")) {
+    cell.classList.toggle("selected", cell.dataset.date === selectedDate);
+  }
+}
+
+function showCalendarError(message) {
+  cal.error.textContent = message;
+  cal.error.hidden = false;
+}
+
+async function loadMonth(year, month, selectDate) {
+  calYear = year;
+  calMonth = month;
+  cal.error.hidden = true;
+  cal.label.textContent = `${MONTHS[month - 1]} ${year}`;
+  cal.grid.replaceChildren();
+  try {
+    const data = await fetchJson(`${API}/calendar/month?year=${year}&month=${month}`);
+
+    for (const wd of WEEKDAYS) {
+      const head = document.createElement("div");
+      head.className = "cal-weekday";
+      head.textContent = wd;
+      cal.grid.appendChild(head);
+    }
+    // Empty leading cells so day 1 lands under its ISO weekday.
+    for (let i = 0; i < data.first_weekday; i += 1) {
+      cal.grid.appendChild(document.createElement("div"));
+    }
+
+    for (const day of data.days) {
+      const cell = document.createElement("div");
+      cell.className = "cal-cell";
+      cell.dataset.date = day.date;
+
+      const num = document.createElement("div");
+      num.className = "cal-daynum";
+      num.textContent = String(Number(day.date.slice(8, 10)));
+      cell.appendChild(num);
+
+      // All statuses; events first, then tasks (server order).
+      for (const item of [...day.events, ...day.tasks]) {
+        const chip = document.createElement("div");
+        chip.className = `cal-chip cal-chip-${item.status}`;
+        chip.textContent = item.title;
+        cell.appendChild(chip);
+      }
+
+      cell.addEventListener("click", () => loadDay(day.date));
+      cal.grid.appendChild(cell);
+    }
+
+    highlightSelectedDay();
+    if (selectDate) loadDay(selectDate);
+  } catch (err) {
+    showCalendarError(`Could not load month: ${err.message}`);
+  }
+}
+
+function shiftMonth(delta) {
+  let month = calMonth + delta;
+  let year = calYear;
+  if (month < 1) { month = 12; year -= 1; }
+  if (month > 12) { month = 1; year += 1; }
+  loadMonth(year, month);
+}
+
+cal.prev.addEventListener("click", () => shiftMonth(-1));
+cal.next.addEventListener("click", () => shiftMonth(1));
+cal.today.addEventListener("click", () => {
+  const now = new Date();
+  loadMonth(now.getFullYear(), now.getMonth() + 1, isoDate(now));
+});
+cal.tabList.addEventListener("click", () => showView("list"));
+cal.tabCalendar.addEventListener("click", () => showView("calendar"));
