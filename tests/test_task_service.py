@@ -272,7 +272,7 @@ class TestConflict:
         with pytest.raises(ScheduleConflictError):
             service.update(item.id, title="y", expected_updated_at=0.0)
 
-    def test_fresh_updated_at_passes(self, service):
+    def test_fresh_updated_at_pass(self, service):
         item = service.create(ItemKind.TASK, "x")
         updated = service.update(item.id, title="y", expected_updated_at=item.updated_at)
         assert updated.title == "y"
