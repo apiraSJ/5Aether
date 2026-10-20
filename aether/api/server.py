@@ -36,11 +36,26 @@ def run(app, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> int:
         port: TCP port for the web server.
 
     Returns:
-        Process exit code (0 on clean shutdown).
+        Process exit code (0 on clean shutdown, 1 when web dependencies
+        are missing from this interpreter).
     """
-    import uvicorn
+    import sys
 
-    from aether.api.main import create_app
+    try:
+        import uvicorn
+
+        from aether.api.main import create_app
+    except ImportError as exc:
+        # Common on machines where `python` resolves to a global install
+        # without the project extras — point at the fix instead of a
+        # raw traceback after a successful boot.
+        print(f"[Aether] Web dependencies missing: {exc}", file=sys.stderr)
+        print(f"[Aether] Interpreter: {sys.executable}", file=sys.stderr)
+        print(
+            '[Aether] Fix: .\\.venv\\Scripts\\python.exe -m pip install -e ".[server]"',
+            file=sys.stderr,
+        )
+        return 1
 
     if app.container is None:
         logger.error("AetherApp has no container — boot() must succeed first.")

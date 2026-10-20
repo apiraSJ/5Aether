@@ -125,3 +125,54 @@ class TestWebServerLifecycle:
         unbooted = AetherApp(config_path=str(WEB_CONFIG))
         assert unbooted.container is None
         assert run(unbooted) == 1
+
+    def test_run_reports_missing_web_dependencies(self, monkeypatch, capsys):
+        """Wrong interpreter (no fastapi/uvicorn) → actionable message, exit 1.
+
+        Acceptance defect #1: running `python -m aether --mode web` with a
+        global Python without the project extras used to die on a raw
+        ModuleNotFoundError traceback right after a successful boot.
+        """
+        import sys
+
+        from aether.app import AetherApp
+        from aether.api.server import run
+
+        # Simulate an interpreter where `uvicorn` is not installed.
+        monkeypatch.setitem(sys.modules, "uvicorn", None)
+
+        app = AetherApp(config_path=str(WEB_CONFIG))
+        assert run(app) == 1
+
+        err = capsys.readouterr().err
+        assert "Web dependencies missing" in err
+        assert "Interpreter:" in err
+        assert 'pip install -e ".[server]"' in err
+
+    def test_run_reports_when_fastapi_is_missing(self, monkeypatch, capsys):
+        """The real acceptance scenario: uvicorn present, fastapi absent.
+
+        Re-imports aether.api.main against a blocked fastapi, exactly like
+        the observed ModuleNotFoundError: No module named 'fastapi'.
+        """
+        import sys
+
+        from aether.app import AetherApp
+        from aether.api.server import run
+
+        monkeypatch.delitem(sys.modules, "aether.api.main", raising=False)
+        monkeypatch.setitem(sys.modules, "fastapi", None)
+
+        app = AetherApp(config_path=str(WEB_CONFIG))
+        assert run(app) == 1
+
+        err = capsys.readouterr().err
+        assert "Web dependencies missing" in err
+        assert "fastapi" in err
+        assert 'pip install -e ".[server]"' in err
+
+    def test_api_package_exposes_create_app_lazily(self):
+        """aether.api.create_app still resolves via the lazy package export."""
+        import aether.api
+
+        assert callable(aether.api.create_app)
