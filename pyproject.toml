@@ -27,9 +27,14 @@ perception = [
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
+    "httpx2>=2.0",
+]
+server = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
 ]
 full = [
-    "aether[gui,perception,dev]",
+    "aether[gui,perception,dev,server]",
 ]
 
 [project.scripts]
