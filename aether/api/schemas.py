@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Any, List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class TaskItemBase(BaseModel):
@@ -44,16 +44,28 @@ class TaskItemBase(BaseModel):
 
 
 class TaskItemCreate(TaskItemBase):
-    """Request schema for creating a task/event."""
+    """Request schema for creating a task/event.
+
+    ``extra="forbid"`` enforces the Contract: unknown fields and any attempt
+    to set server-controlled values (``id``, ``status``, ``internal_status``,
+    ``created_at``, ``updated_at``) are rejected with 400 validation_error.
+    """
 
     # internal_status is server-set to "confirmed" for MVP
+    model_config = ConfigDict(extra="forbid")
 
 
 class TaskItemUpdate(BaseModel):
     """Request schema for updating a task/event (partial update).
 
-    Only updatable fields per ScheduleService._UPDATABLE_FIELDS.
+    Only updatable fields per ScheduleService._UPDATABLE_FIELDS; unknown
+    fields are rejected (extra="forbid"). Explicit ``null`` clears a
+    nullable field (description/due_date/start_at/end_at/owner) and is
+    rejected for fields that must keep a value (title/tz/status/all_day/
+    source).
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     title: Optional[str] = Field(default=None, min_length=1, max_length=500)
     description: Optional[str] = None
@@ -100,6 +112,26 @@ class TaskItemUpdate(BaseModel):
                 "internal_status cannot be modified via API in MVP"
             )
         return v
+
+    @model_validator(mode="after")
+    def reject_null_for_required_value_fields(self):
+        """Explicit null is only valid where it clears an optional field.
+
+        Uses ``model_fields_set`` so a field that was simply omitted (and
+        therefore carries its default, often None) is not mistaken for an
+        explicit null.
+        """
+        required = ("title", "tz", "status", "all_day", "source")
+        present_nulls = [
+            f
+            for f in required
+            if f in self.model_fields_set and getattr(self, f) is None
+        ]
+        if present_nulls:
+            raise ValueError(
+                f"cannot set {present_nulls} to null; omit the field or send a valid value"
+            )
+        return self
 
 
 class TaskItemResponse(TaskItemBase):

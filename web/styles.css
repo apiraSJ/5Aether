@@ -89,6 +89,61 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 
 .muted { color: var(--muted); font-size: 14px; }
 
+/* ── Create / edit form (P2) ─────────────────────────── */
+
+.task-form { font-size: 14px; }
+
+.form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.task-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.task-form label.grow { flex: 1 1 260px; }
+
+.task-form input,
+.task-form select,
+.task-form textarea {
+  font: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text);
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.task-form input:focus,
+.task-form select:focus,
+.task-form textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.form-actions { display: flex; gap: 10px; }
+
+#save-btn {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+#save-btn:hover { color: #fff; opacity: 0.9; }
+#save-btn:disabled { opacity: 0.6; cursor: wait; }
+
+.task-table td button {
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
 .error-banner {
   background: #fdecec;
   color: var(--bad);

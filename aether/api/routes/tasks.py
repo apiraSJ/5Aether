@@ -80,7 +80,7 @@ async def create_task(
 @router.patch("/{item_id}", response_model=TaskItemResponse)
 async def update_task(
     item_id: str,
-    payload: "TaskItemUpdate",
+    payload: TaskItemUpdate,
     if_match: Optional[str] = Header(None, alias="If-Match"),
     service: "ScheduleService" = Depends(get_schedule_service),
 ) -> TaskItemResponse:
@@ -88,10 +88,9 @@ async def update_task(
 
     Uses PATCH for partial update per API Contract v1.1.
     Optimistic concurrency via If-Match header with exact updated_at float.
-    internal_status cannot be modified by client in MVP.
+    internal_status cannot be modified by client in MVP (enforced by schema
+    and re-checked here).
     """
-    from aether.api.schemas import TaskItemUpdate  # local import to avoid circular
-
     # Parse If-Match header for optimistic concurrency
     expected_updated_at = None
     if if_match:
@@ -105,8 +104,9 @@ async def update_task(
                 detail="If-Match header must be a valid float (updated_at value)",
             )
 
-    # Build changes dict from payload (exclude unset fields)
-    changes = payload.model_dump(exclude_unset=True, exclude_none=True)
+    # Explicit nulls are kept: they clear nullable fields (schema rejects
+    # null where a value is required). Enum coercion happens in the service.
+    changes = payload.model_dump(exclude_unset=True)
 
     # Server-side enforcement: reject internal_status changes in MVP
     if "internal_status" in changes:
@@ -116,10 +116,6 @@ async def update_task(
             status_code=400,
             detail="internal_status cannot be modified via API in MVP",
         )
-
-    # Coerce enum fields
-    if "status" in changes:
-        changes["status"] = ItemStatus(changes["status"])
 
     item = service.update(
         item_id=item_id,

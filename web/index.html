@@ -15,11 +15,71 @@
   <main>
     <section class="panel">
       <div class="panel-head">
+        <h2 id="form-title">New task</h2>
+        <button id="cancel-btn" type="button" hidden>Cancel edit</button>
+      </div>
+
+      <div id="error-banner" class="error-banner" hidden></div>
+
+      <form id="task-form" class="task-form">
+        <div class="form-row">
+          <label>
+            Kind
+            <select id="f-kind" name="kind">
+              <option value="task">task</option>
+              <option value="event">event</option>
+            </select>
+          </label>
+          <label class="grow">
+            Title *
+            <input id="f-title" name="title" type="text" maxlength="500" required
+                   placeholder="e.g. Send weekly report">
+          </label>
+          <label>
+            Timezone
+            <select id="f-tz" name="tz">
+              <option value="Asia/Bangkok">Asia/Bangkok</option>
+              <option value="UTC">UTC</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="form-row">
+          <label id="task-field">
+            Due date
+            <input id="f-due" name="due_date" type="date">
+          </label>
+          <label id="event-field" hidden>
+            Start
+            <input id="f-start" name="start_at" type="datetime-local">
+          </label>
+          <label id="event-field-2" hidden>
+            End
+            <input id="f-end" name="end_at" type="datetime-local">
+          </label>
+        </div>
+
+        <div class="form-row">
+          <label class="grow">
+            Description
+            <textarea id="f-desc" name="description" rows="2"
+                      placeholder="Optional details"></textarea>
+          </label>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" id="save-btn">Add task</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
         <h2>Tasks</h2>
         <button id="refresh-btn" type="button">Refresh</button>
       </div>
 
-      <div id="error-banner" class="error-banner" hidden></div>
+      <div id="list-error" class="error-banner" hidden></div>
 
       <table id="task-table" class="task-table" hidden>
         <thead>
@@ -28,6 +88,7 @@
             <th>Due / Start</th>
             <th>Kind</th>
             <th>Status</th>
+            <th></th>
           </tr>
         </thead>
         <tbody id="task-list"></tbody>
