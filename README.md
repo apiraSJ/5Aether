@@ -13,8 +13,8 @@ Aether is a command-driven AI Spatial Assistant with a plugin-based runtime, eve
 
 **Backend v1.0.0** — Architecture Stable (tagged `backend-v1.0.0`)
 **UI Lifecycle** — UI-0 through UI-1 complete, UI-2 in progress
-**Mark-1 Track A (Schedule Engine)** — Phases 1-3 + R1/R6 complete, **1,349 tests passing** (commit `a148439`)
-**Mark-1 Track B (Web Application)** — Planned (HTML/CSS/JS + PHP, consuming Track A via API)
+**Mark-1 Track A (Schedule Engine)** — Core schedule engine implemented; R1/R6 chronology and date-only validation rules are documented below. Phase 4 temporal extraction is in progress.
+**Mark-1 Track B (Web Application)** — In progress / partially implemented: FastAPI task/calendar API and HTML/CSS/JS frontend are present. Verify the current test count and commit before publishing release claims.
 
 ---
 
@@ -58,31 +58,57 @@ scripts\profile.bat 30       # 30-second hardware validation
 ### Tests
 
 ```bash
-python -m pytest tests/ -v           # All 1,349 tests
+python -m pytest tests/ -v           # Run the full test suite
 ```
 
 ---
 
-## Mark-1 Track B — Web (Planned)
+## Mark-1 Track B — Web (In Progress / Partial)
 
-**Not yet implemented.** This section describes the planned Web track.
+Track B has a Python FastAPI backend and an HTML/CSS/JavaScript frontend. The browser UI calls the API; PHP is not part of the documented implementation.
 
-### Planned Quick Start (Web)
+### Web Components
+
+- `aether/api/` — FastAPI application, server setup, schemas, dependencies, middleware, and error handling.
+- `aether/api/routes/tasks.py` — task CRUD and task actions.
+- `aether/api/routes/calendar.py` — calendar day/week/month queries.
+- `web/` — frontend entry point (`index.html`), application logic (`app.js`), and styles (`styles.css`).
+- `web/frontend/` — packaged frontend copy.
+- `config/web.yaml` — web-mode configuration.
+- `data/tasks.db` — SQLite schedule data shared with the Python schedule engine.
+
+The API is mounted under `/api/v1`; `/health` provides a health endpoint, and the root route serves the web UI. The Python schedule engine remains responsible for schedule data access and writes.
+
+### Quick Start (Web)
+
+From the repository root, create and activate a virtual environment, then install the server extra:
 
 ```bash
-# After Web track implementation:
-# 1. Start Python API service (FastAPI wrapping ScheduleService)
-# 2. Start PHP development server
-# 3. Open http://localhost:XXXX in browser
+python -m venv .venv
+# Windows:
+.venv\Scripts\activate
+# macOS/Linux:
+source .venv/bin/activate
+
+pip install -e ".[server]"
 ```
 
-### Planned Web Features
+Start the application in web mode using the repository entry point:
 
-- Task list, creation, editing, completion
-- Calendar/Event view (day/week/month)
-- Responsive: desktop + mobile browsers
-- Review queue UI for extraction uncertainty and import conflicts
-- Shared `data/tasks.db` with Track A (Python remains sole writer)
+```bash
+python -m aether --mode web
+```
+
+Then open the local address and port reported by the server in your browser. Check `config/web.yaml` for the configured web/server settings. If your checkout exposes a different web-mode command, use `python -m aether --help` to inspect the available modes.
+
+### Current Scope
+
+- Task list, creation, editing, completion, and cancellation.
+- Calendar day/month views and backend day/week/month query support.
+- API concurrency handling for edits using `If-Match` / `updated_at`.
+- Shared `data/tasks.db` storage through the Python schedule engine.
+
+The review-queue UI and broader extraction workflow should be treated as roadmap work unless confirmed in the current implementation and tests.
 
 ---
 
@@ -172,6 +198,12 @@ Camera ──▶ FrameBroker ──▶ YOLO / MediaPipe ──▶ PerceptionResu
 
 ---
 
+## System Adapter Layer
+
+`systems/` contains the host/platform adapter layer and discovers system modules through `manifest.yaml`. The current `systems/mark1/` adapter wraps the existing Mark-1 services; it is an integration layer, not a relocation of the schedule engine or API code. See the architecture and capability documents for the intended boundaries and current audit findings.
+
+---
+
 ## Mark-1 Track A — Schedule Engine (Implemented)
 
 ### Components
@@ -185,7 +217,9 @@ Camera ──▶ FrameBroker ──▶ YOLO / MediaPipe ──▶ PerceptionResu
 | **Service** | `aether/task/service.py` | `ScheduleService` — validated CRUD, optimistic concurrency, audit history |
 | **Calendar Queries** | `aether/task/calendar_query.py` | Day/week/month views, overlap detection |
 | **JSON Adapter** | `aether/task/json_adapter.py` | Canonical import/export, dedupe, conflict policies |
+| **Temporal Extraction** | `aether/task/extraction.py` | Phase 4 extraction helper; consult `docs/PHASE4_SPEC.md` for intended behavior and status |
 | **Plugin** | `aether/plugins/task_plugin.py` | CLI commands + `TASK_*` events |
+| **HTTP API** | `aether/api/` | FastAPI task/calendar endpoints for Track B |
 
 ### Data Model Invariants (Locked)
 
@@ -230,7 +264,12 @@ task:
 
 ```text
 Aether/
-├── aether/                        # Source code
+├── aether/                        # Main Python package
+│   ├── api/                       # FastAPI app, server, schemas, middleware, routes
+│   │   └── routes/                # Task and calendar API endpoints
+│   ├── ai/                        # AI context, intent/provider, memory and tools
+│   ├── services/                  # Runtime-facing service adapters
+│   ├── domain/                    # Shared domain models
 │   ├── core/                      # Runtime foundation
 │   │   ├── application.py         # Boot → Tick → Shutdown lifecycle
 │   │   ├── command.py             # Command dataclass
@@ -268,7 +307,7 @@ Aether/
 │   │   ├── hand_plugin.py         # MediaPipe GestureRecognizer
 │   │   ├── object_plugin.py       # YOLOv8 + solvePnP
 │   │   └── cursor_plugin.py       # Cursor + PinchClick
-│   ├── ui/                        # GUI widgets + lifecycle
+│   ├── ui/                        # GUI widgets + lifecycle (tree below is not exhaustive)
 │   │   ├── ui_shell.py            # UIShell — owns window, camera, panels
 │   │   ├── ui_context.py          # UIContext — DI bundle for widgets
 │   │   ├── camera_widget.py       # Camera feed widget
@@ -279,6 +318,7 @@ Aether/
 │   │   ├── timeline_widget.py     # Event timeline
 │   │   └── hud_manager.py         # Multi-layer throttle scheduler
 │   ├── task/                      # Mark-1 Schedule Engine (Track A)
+│   │   ├── extraction.py           # Phase 4 temporal extraction helper
 │   │   ├── models.py              # TaskItem, Evidence, HistoryEntry, ReviewEntry, ImportBatch
 │   │   ├── schema.py              # SQLite DDL
 │   │   ├── migrations.py          # user_version migrations
@@ -287,13 +327,23 @@ Aether/
 │   │   ├── calendar_query.py      # Calendar views (pure functions)
 │   │   ├── json_adapter.py        # Canonical JSON import/export
 │   │   └── __init__.py            # Exports
-│   ├── memory/                    # Memory service
-│   │   └── memory_service.py      # SQLite (WAL) persistence
+│   ├── memory/                    # Memory persistence and models
 │   └── config/                    # Config loader
+├── systems/                       # Manifest-discovered system adapters
+│   └── mark1/                     # Mark-1 adapter over existing services
+├── web/                           # Mark-1 browser frontend
+│   ├── index.html                 # Main page
+│   ├── app.js                     # API client and UI behavior
+│   ├── styles.css                 # Frontend styles
+│   └── frontend/                  # Packaged frontend copy
 ├── config/
 │   ├── default.yaml               # Base config
 │   ├── vision.yaml                # Vision plugin load order + settings
-│   └── task.yaml                  # Task/Calendar config
+│   ├── task.yaml                  # Task/Calendar config
+│   ├── web.yaml                   # Web/API mode settings
+│   ├── ai.yaml                    # AI provider/settings
+│   ├── memory.yaml                # Memory settings
+│   └── gesture.yaml               # Gesture settings
 ├── scripts/
 │   ├── setup.bat                  # One-click setup
 │   ├── start.bat                  # Launch Aether
@@ -303,9 +353,11 @@ Aether/
 ├── data/                          # Runtime data (gitignored)
 │   ├── memory.db                  # Memory Core SQLite
 │   └── tasks.db                   # Mark-1 Schedule SQLite (gitignored)
-├── tests/                         # 1,349 tests
+├── docs/                          # Architecture, roadmap, audits and phase specs
+├── tests/                         # Test suite (run locally for current count)
 ├── pyproject.toml
-└── main.py                        # Legacy entry point
+├── start.py                        # Environment-aware launcher (if present in checkout)
+└── main.py                         # Legacy entry point
 ```
 
 ---
@@ -325,7 +377,7 @@ Aether/
 
 ## Configuration
 
-All settings in `config/vision.yaml` and `config/task.yaml`:
+Settings are split across the configuration files under `config/`, including `config/vision.yaml`, `config/task.yaml`, and `config/web.yaml`:
 
 ```yaml
 # config/task.yaml
@@ -376,11 +428,14 @@ plugins:
 
 ## Testing
 
+Run the suite in the active environment and use the resulting summary as the source of truth for the test count.
+
 ```bash
-python -m pytest tests/ -v           # All 1,349 tests
+python -m pytest tests/ -v
 python -m pytest tests/test_ui_lifecycle.py -v  # UI lifecycle tests
 python -m pytest tests/test_cli_system.py -v    # CLI + intent tests
 python -m pytest tests/test_task_*.py -v        # Mark-1 Track A tests
+python -m pytest tests/test_api_*.py -v          # Mark-1 API tests
 ```
 
 ---
@@ -394,19 +449,26 @@ python -m pytest tests/test_task_*.py -v        # Mark-1 Track A tests
 | `docs/UI-2-plan.md` | UI-2 Global Hotkey implementation plan |
 | `docs/workspace.md` | Workspace + Layout system |
 | `docs/REVIEW_AUDIT.md` | Mark-1 Phase 0 review audit |
-| `docs/PHASE4_SPEC.md` | Phase 4 Temporal Extraction spec (Draft) |
+| `docs/ARCHITECTURE_AUDIT.md` | Architecture audit and known design gaps |
+| `docs/CAPABILITY_INVENTORY.md` | Inventory of implemented capabilities |
+| `docs/PHASE4_SPEC.md` | Phase 4 Temporal Extraction specification (check document status before treating it as final) |
 | `docs/AI_ASSISTANT_BASELINE.md` | Historical baseline (Sep 2026) |
 
 ---
 
-## Backend v1.0.0 — Known Issues
+## Known Issues and Roadmap
 
-| Issue | Impact | Fix planned |
-|-------|--------|-------------|
-| Camera P95=48ms | Occasional frame drop | Hardware upgrade |
-| Tick overrun ~30% | GUI jank under load | Budget optimization |
-| YOLO ~5-8 Hz | Object detection delay | Scheduler tuning v1.0.1 |
-| CLI degraded mode | No tab-completion on Windows | `pip install pyreadline3` |
+Use `docs/ROADMAP.md` for planned work and `docs/ARCHITECTURE_AUDIT.md` for the latest recorded architecture findings. The performance observations below are historical baseline notes, not a guarantee that they describe the current machine or checkout.
+
+| Historical observation | Potential impact | Follow-up |
+|-------------------------|------------------|-----------|
+| Camera P95 around 48ms | Occasional frame drops | Re-measure on target hardware |
+| Tick overrun around 30% | GUI jank under load | Re-profile and optimize budgets |
+| YOLO around 5–8 Hz | Object detection delay | Re-profile scheduler and model settings |
+| CLI degraded mode on Windows | No tab-completion | Check optional readline support |
+
+Before publishing a release, re-run the test suite and update test counts, commit IDs, and performance figures from current results. Track B is partially implemented; do not describe planned review-queue or extraction UI as complete unless verified.
+
 
 ---
 
