@@ -8,6 +8,7 @@ from __future__ import annotations
 from fastapi import Depends, HTTPException, Request, status
 
 from aether.core.service_container import ServiceContainer
+from aether.task.contextcal import ContextCalService
 from aether.task.service import ScheduleService
 
 
@@ -39,3 +40,15 @@ def get_schedule_service(
             detail="ScheduleService not available",
         )
     return container.resolve("schedule_service")
+
+
+def get_contextcal_service(
+    container: ServiceContainer = Depends(get_service_container),
+) -> ContextCalService:
+    """Get the ContextCalService instance from the container."""
+    if not container.has("contextcal_service"):
+        raise HTTPException(
+            status_code=503,
+            detail="ContextCalService not available",
+        )
+    return container.resolve("contextcal_service")

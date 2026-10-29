@@ -17,7 +17,7 @@ import yaml
 from aether.core.command import Command
 from aether.core.command_bus import CommandBus
 from aether.core.command_registry import CommandRegistry
-from aether.core.event_bus_v2 import EventBus
+from aether.core.event_bus import EventBus
 from aether.core.event_type import EventType
 from aether.core.service_container import ServiceContainer
 from aether.plugins.task_plugin import TaskPlugin
@@ -43,7 +43,7 @@ class _FakeConfig:
 
 def _container_for(db_path):
     container = ServiceContainer()
-    container.register_instance("event_bus", EventBus(queued=False))
+    container.register_instance("event_bus", EventBus())
     container.register_instance("command_bus", CommandBus())
     container.register_instance("command_registry", CommandRegistry())
     container.register_instance("config", _FakeConfig({"task.db_path": db_path}))
@@ -72,7 +72,7 @@ def env(tmp_path):
 
 
 def _event_types(events):
-    return [e.type.value for e in events]
+    return [e.name for e in events]
 
 
 def _history_count(container, item_id):
@@ -95,6 +95,11 @@ class TestLifecycle:
             "task.calendar",
             "task.export",
             "task.import",
+            "task.extract",
+            "task.review.list",
+            "task.review.confirm",
+            "task.review.edit",
+            "task.review.reject",
         ]
 
     def test_initialize_registers_shared_services(self, env):
@@ -110,6 +115,8 @@ class TestLifecycle:
         for name in (
             "task.create", "task.list", "task.complete", "task.cancel",
             "task.update", "task.calendar", "task.export", "task.import",
+            "task.extract", "task.review.list", "task.review.confirm",
+            "task.review.edit", "task.review.reject",
         ):
             assert registry.is_registered(name), name
 
@@ -153,7 +160,7 @@ class TestCreateCommand:
         assert result["item"]["due_date"] == "2026-11-05"
         assert result["item"]["tz"] == "Asia/Bangkok"
         assert _event_types(events) == ["task.ready", "task.created"]
-        assert events[-1].type == EventType.TASK_CREATED
+        assert events[-1].name == EventType.TASK_CREATED
         assert events[-1].payload["item"]["id"] == result["item_id"]
         assert events[-1].payload["item"]["title"] == "Pay rent"
 
@@ -273,7 +280,7 @@ class TestCompleteCommand:
         assert result["ok"] is True
         assert result["item"]["status"] == "completed"
         assert _event_types(events) == ["task.ready", "task.created", "task.completed"]
-        assert events[-1].type == EventType.TASK_COMPLETED
+        assert events[-1].name == EventType.TASK_COMPLETED
 
     def test_missing_item_id(self, env):
         _, container, events, _ = env
@@ -316,7 +323,7 @@ class TestCancelCommand:
         result = _dispatch(container, "task.cancel", {"item_id": created["item_id"], "reason": "no longer needed"})
         assert result["ok"] is True
         assert result["item"]["status"] == "cancelled"
-        assert events[-1].type == EventType.TASK_CANCELLED
+        assert events[-1].name == EventType.TASK_CANCELLED
         assert events[-1].payload["reason"] == "no longer needed"
         history = container.resolve("schedule_service").history(created["item_id"])
         assert history[0].note == "no longer needed"
@@ -350,7 +357,7 @@ class TestUpdateCommand:
         assert result["ok"] is True
         assert result["item"]["title"] == "new"
         assert result["changed_fields"] == ["title"]
-        assert events[-1].type == EventType.TASK_UPDATED
+        assert events[-1].name == EventType.TASK_UPDATED
         assert events[-1].payload["changed_fields"] == ["title"]
 
     def test_update_due_date(self, env):

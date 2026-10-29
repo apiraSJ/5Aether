@@ -33,6 +33,8 @@ from aether.task.models import (
     InternalStatus,
     ItemKind,
     ItemStatus,
+    ReviewEntry,
+    ReviewState,
     TaskItem,
     is_date_only,
     item_to_dict,
@@ -221,6 +223,94 @@ class ScheduleService:
         logger.info("item updated: %s fields=%s", item_id, changed)
         return merged
 
+    # ── Reviews (Phase 4) ───────────────────────────────────────────
+
+    def list_pending_reviews(self) -> List[ReviewEntry]:
+        """List pending reviews."""
+        return self._repo.list_reviews(ReviewState.PENDING)
+
+    def list_reviews(self, state: Optional[ReviewState] = None) -> List[ReviewEntry]:
+        """List reviews optionally filtered by state."""
+        return self._repo.list_reviews(state)
+
+    def resolve_review(
+        self,
+        review_id: str,
+        decision: str,
+        *,
+        corrected_fields: Optional[Dict[str, Any]] = None,
+        actor: str = "user",
+    ) -> Dict[str, Any]:
+        """Resolve a pending review according to Phase 4 matrix.
+
+        decision: confirm|edit|reject
+        """
+        decision_l = decision.lower()
+        if decision_l not in ("confirm", "edit", "reject"):
+            raise ScheduleValidationError(f"invalid decision: {decision!r}")
+
+        reviews = self._repo.list_reviews()
+        review = None
+        for r in reviews:
+            if r.id == review_id:
+                review = r
+                break
+        if review is None:
+            raise ScheduleNotFoundError(f"review not found: {review_id}")
+        if review.state != ReviewState.PENDING:
+            raise ScheduleConflictError(f"review {review_id} not pending")
+
+        now = time.time()
+        corrected_fields = corrected_fields or {}
+
+        if decision_l == "reject":
+            with self._repo.transaction():
+                ok = self._repo.resolve_review(review_id, ReviewState.REJECTED, now)
+                if not ok:
+                    raise ScheduleConflictError(f"review {review_id} could not be resolved")
+                self.delete(review.item_id, actor=actor)
+            return {"ok": True, "decision": "reject", "review_id": review_id, "item_id": review.item_id}
+
+        if decision_l == "confirm":
+            with self._repo.transaction():
+                ok = self._repo.resolve_review(review_id, ReviewState.CONFIRMED, now)
+                if not ok:
+                    raise ScheduleConflictError(f"review {review_id} could not be resolved")
+                item = self.update(review.item_id, internal_status=InternalStatus.CONFIRMED, actor=actor)
+                entry = HistoryEntry(
+                    item_id=item.id,
+                    action=HistoryAction.REVIEWED,
+                    before=None,
+                    after=item_to_dict(item),
+                    changed_fields=[],
+                    note="confirmed",
+                    actor=actor,
+                    created_at=now,
+                )
+                self._repo.append_history(entry)
+            return {"ok": True, "decision": "confirm", "review_id": review_id, "item_id": item.id, "item": item_to_dict(item)}
+
+        # edit
+        with self._repo.transaction():
+            ok = self._repo.resolve_review(review_id, ReviewState.EDITED, now)
+            if not ok:
+                raise ScheduleConflictError(f"review {review_id} could not be resolved")
+            changes = dict(corrected_fields)
+            changes["internal_status"] = InternalStatus.CONFIRMED
+            item = self.update(review.item_id, actor=actor, **changes)
+            entry = HistoryEntry(
+                item_id=item.id,
+                action=HistoryAction.REVIEWED,
+                before=None,
+                after=item_to_dict(item),
+                changed_fields=[],
+                note="edited",
+                actor=actor,
+                created_at=now,
+            )
+            self._repo.append_history(entry)
+        return {"ok": True, "decision": "edit", "review_id": review_id, "item_id": item.id, "item": item_to_dict(item)}
+
     def complete(self, item_id: str, *, actor: str = "user") -> TaskItem:
         """Mark a pending task completed (events cannot be completed)."""
         now = time.time()
@@ -354,10 +444,15 @@ class ScheduleService:
         """Full kind-aware rule matrix; returns the normalized item."""
         if not item.title or not item.title.strip():
             raise ScheduleValidationError("title must be non-empty")
-        try:
-            tzinfo_for(item.tz)
-        except ValueError as exc:
-            raise ScheduleValidationError(str(exc)) from exc
+        # Confirmed items must use a supported timezone. Uncertain (needs
+        # confirmation) items may carry an unsupported tz name verbatim so
+        # the original identity is preserved for review (R4) instead of
+        # being guessed or rejected outright.
+        if item.internal_status is InternalStatus.CONFIRMED:
+            try:
+                tzinfo_for(item.tz)
+            except ValueError as exc:
+                raise ScheduleValidationError(str(exc)) from exc
 
         # Kind rules.
         if item.kind is ItemKind.TASK:
@@ -372,7 +467,9 @@ class ScheduleService:
                 raise ScheduleValidationError(
                     "events use start_at, not due_date"
                 )
-            if item.start_at is None:
+            # Uncertain extractions may not yet have a start_at; only confirmed
+            # items must satisfy the full event shape.
+            if item.start_at is None and item.internal_status is InternalStatus.CONFIRMED:
                 raise ScheduleValidationError("events require start_at")
 
         # all_day handling: keep date-only values date-only (no midnight).
@@ -401,16 +498,22 @@ class ScheduleService:
                         f"{name} must include a time when all_day=False "
                         f"(a bare date is never turned into midnight), got {value!r}"
                     )
-            start = (
-                normalize_datetime(item.start_at, item.tz)
-                if item.start_at is not None
-                else None
-            )
-            end = (
-                normalize_datetime(item.end_at, item.tz)
-                if item.end_at is not None
-                else None
-            )
+            if item.start_at is not None:
+                try:
+                    start = normalize_datetime(item.start_at, item.tz)
+                except ValueError:
+                    # Preserve original (possibly unsupported tz) verbatim
+                    # for uncertain items instead of guessing.
+                    start = item.start_at
+            else:
+                start = None
+            if item.end_at is not None:
+                try:
+                    end = normalize_datetime(item.end_at, item.tz)
+                except ValueError:
+                    end = item.end_at
+            else:
+                end = None
             item = replace(item, start_at=start, end_at=end)
             if item.end_at is not None and item.start_at is not None:
                 if datetime.fromisoformat(item.end_at) < datetime.fromisoformat(

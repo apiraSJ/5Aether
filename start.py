@@ -30,8 +30,10 @@ def ensure_venv():
     subprocess.run([sys.executable, "-m", "venv", str(VENV)], check=True)
 
     print("[Aether] Installing dependencies...")
+    # ".[server]" so a fresh venv can run --mode web (fastapi/uvicorn)
+    # immediately; existing envs skip this function entirely (see guard above).
     subprocess.run(
-        [str(PYTHON), "-m", "pip", "install", "-e", ".", "-q"],
+        [str(PYTHON), "-m", "pip", "install", "-e", ".[server]", "-q"],
         cwd=str(ROOT),
         check=True,
     )

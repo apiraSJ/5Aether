@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS items (
     created_at      REAL NOT NULL,
     updated_at      REAL NOT NULL,
     -- Kind-shape rules (service enforces the full matrix):
-    CHECK (kind <> 'event' OR start_at IS NOT NULL),           -- events require start
+    CHECK (kind <> 'event' OR start_at IS NOT NULL OR internal_status = 'needs_confirmation'), -- events require start unless uncertain
     CHECK (kind <> 'event' OR due_date IS NULL),               -- events use start_at, not due_date
     CHECK (kind <> 'task' OR all_day = 0),                     -- all_day is event-only
     CHECK (due_date IS NULL OR length(due_date) = 10),         -- due_date is date-only

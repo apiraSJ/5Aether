@@ -71,6 +71,14 @@ class TestRootEndpoint:
         assert "text/html" in response.headers["content-type"]
         assert "Aether Mark-1" in response.text
 
+    def test_root_references_served_versioned_assets(self, client: TestClient):
+        """The page's cache-busted asset URLs resolve through the static mount."""
+        response = client.get("/")
+        assert '/static/styles.css?v=4' in response.text
+        assert '/static/app.js?v=4' in response.text
+        assert client.get("/static/styles.css?v=4").status_code == 200
+        assert client.get("/static/app.js?v=4").status_code == 200
+
     def test_static_assets_served(self, client: TestClient):
         """Frontend assets are served from the same origin under /static."""
         css = client.get("/static/styles.css")

@@ -230,6 +230,93 @@ class ErrorResponse(BaseModel):
     detail: Optional[str] = None
 
 
+class ContextCalCandidate(BaseModel):
+    """A candidate item extracted from text."""
+    kind: str
+    title: str
+    description: str = ""
+    due_date: Optional[str] = None
+    start_at: Optional[str] = None
+    end_at: Optional[str] = None
+    all_day: bool = False
+    tz: Optional[str] = None
+    confidence: float = 0.5
+    rule_id: str = ""
+    raw_excerpt: str = ""
+    needs_review: bool = False
+    review_reason: Optional[str] = None
+    missing_fields: List[str] = []
+
+
+class ContextCalDraftItem(BaseModel):
+    """A draft item wrapping a candidate."""
+    draft_item_id: str
+    candidate: ContextCalCandidate
+    missing_fields: List[str] = []
+    confidence: float = 0.5
+
+
+class ContextCalAnalyzeRequest(BaseModel):
+    """Request to analyze text."""
+    text: str = Field(min_length=1)
+    tz: str = "Asia/Bangkok"
+
+    @field_validator("tz")
+    @classmethod
+    def validate_tz(cls, v: str) -> str:
+        if v not in ("Asia/Bangkok", "UTC"):
+            raise ValueError("Unsupported timezone. Supported: Asia/Bangkok, UTC")
+        return v
+
+
+class ContextCalAnalyzeResponse(BaseModel):
+    """Response from analyze."""
+    draft_id: str
+    state: str
+    expires_at: float
+    tz: str
+    source_text: str
+    items: List[ContextCalDraftItem]
+
+
+class ContextCalConfirmSelection(BaseModel):
+    """A selection for confirmation."""
+    draft_item_id: str
+    accept: bool = True
+    fields: dict = {}
+
+
+class ContextCalConfirmRequest(BaseModel):
+    """Request to confirm a draft."""
+    selections: List[ContextCalConfirmSelection]
+
+
+class ContextCalConfirmOutcome(BaseModel):
+    """Outcome of confirming one item."""
+    draft_item_id: str
+    ok: bool
+    item_id: Optional[str] = None
+    error: Optional[str] = None
+
+
+class ContextCalConfirmResponse(BaseModel):
+    """Response from confirm."""
+    draft_id: str
+    committed: bool
+    outcomes: List[ContextCalConfirmOutcome]
+    created_item_ids: List[str]
+
+
+class ContextCalDraftResponse(BaseModel):
+    """Response for getting a draft."""
+    draft_id: str
+    state: str
+    expires_at: float
+    tz: str
+    source_text: str
+    items: List[ContextCalDraftItem]
+
+
 class HealthResponse(BaseModel):
     """Health check response."""
 

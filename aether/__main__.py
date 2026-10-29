@@ -11,13 +11,19 @@ Usage:
     python -m aether --mode vision --profile --duration 30   # Profile for 30s then print report
     python -m aether --config config/vision.yaml
     python -m aether --strict-plugins
+
+When launched with an interpreter outside the project .venv (e.g. a global
+Python on PATH), the process re-launches itself with .venv/Scripts/python —
+the project environment is the single source of dependencies.
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
+import os
 import signal
+import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
@@ -26,6 +32,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = PROJECT_ROOT / "config" / "default.yaml"
 VISION_CONFIG = PROJECT_ROOT / "config" / "vision.yaml"
 WEB_CONFIG = PROJECT_ROOT / "config" / "web.yaml"
+VENV_PYTHON = (
+    PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
+    if os.name == "nt"
+    else PROJECT_ROOT / ".venv" / "bin" / "python"
+)
+REEXEC_ENV = "AETHER_VENV_REEXEC"
 
 BANNER = r"""
    ___    __      __  ___          __
@@ -211,7 +223,62 @@ def _run_boot_proof(app) -> None:
             logger.info("Boot proof 'system.info' -> no handler registered")
 
 
+def _reexec_in_venv_if_needed(raw_argv: list) -> None:
+    """Re-launch ``python -m aether`` under the project .venv interpreter.
+
+    Any guard hit skips the re-exec and the current interpreter continues:
+
+      1. ``REEXEC_ENV`` is already set — this process IS the re-launched
+         child (loop protection). The flag travels only inside the child's
+         environment (``env=`` copy); neither the parent's ``os.environ``
+         nor the user's shell is ever modified.
+      2. Already inside a virtual environment (``sys.prefix != base_prefix``).
+      3. The project .venv does not exist yet — ``start.py`` bootstraps it.
+
+    ``PROJECT_ROOT`` comes from ``__file__`` (never the CWD), and the child
+    runs with ``cwd=PROJECT_ROOT`` so it resolves the package regardless of
+    where the parent was started from.
+
+    The child's exit code is forwarded verbatim. On Ctrl+C the signal reaches
+    parent and child together (same console); the child owns graceful
+    shutdown, so the parent only collects the child's real exit code —
+    escalating to kill + 130 solely when interrupted twice.
+
+    Args:
+        raw_argv: Unparsed CLI arguments to forward to the child process.
+
+    Raises:
+        SystemExit: Always, with the child's exit code (re-exec terminal).
+    """
+    if REEXEC_ENV in os.environ:
+        return
+    if sys.prefix != sys.base_prefix:
+        return
+    if not VENV_PYTHON.exists():
+        return
+
+    child_env = os.environ.copy()
+    child_env[REEXEC_ENV] = "1"
+    cmd = [str(VENV_PYTHON), "-m", "aether", *raw_argv]
+    print(f"[Aether] Re-launching with .venv interpreter: {VENV_PYTHON}", flush=True)
+    proc = subprocess.Popen(cmd, cwd=str(PROJECT_ROOT), env=child_env)
+    try:
+        code = proc.wait()
+    except KeyboardInterrupt:
+        # Ctrl+C hit both processes — wait for the child's clean shutdown
+        # instead of masking its exit code in the parent.
+        try:
+            code = proc.wait()
+        except KeyboardInterrupt:
+            proc.kill()
+            code = 130
+    raise SystemExit(code)
+
+
 def main(argv: Optional[list] = None) -> int:
+    raw_argv = list(sys.argv[1:]) if argv is None else list(argv)
+    _reexec_in_venv_if_needed(raw_argv)
+
     args = _parse_args(argv)
     
     # Auto-select vision config for vision mode

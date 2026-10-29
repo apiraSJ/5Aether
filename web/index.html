@@ -1,140 +1,150 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="th">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Aether Mark-1 — Tasks</title>
-  <link rel="stylesheet" href="/static/styles.css">
+  <meta name="theme-color" content="#f7f8fc">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%235146e5'/%3E%3Ctext x='16' y='23' font-size='20' font-family='Arial' font-weight='700' text-anchor='middle' fill='white'%3E%C3%86%3C/text%3E%3C/svg%3E">
+  <title>Aether Mark-1 — ContextCal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css?v=4">
 </head>
 <body>
-  <header class="site-header">
-    <h1>Aether Mark-1</h1>
-    <p class="subtitle">Task &amp; Calendar Assistant</p>
-  </header>
-
-  <main>
-    <nav class="tabs" aria-label="Views">
-      <button type="button" id="tab-list" class="tab active">List</button>
-      <button type="button" id="tab-calendar" class="tab">Calendar</button>
-    </nav>
-
-    <div id="list-view">
-    <section class="panel">
-      <div class="panel-head">
-        <h2 id="form-title">New task</h2>
-        <button id="cancel-btn" type="button" hidden>Cancel edit</button>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="#" aria-label="Aether Mark-1 home">
+        <span class="brand-mark">Æ</span><span class="brand-copy"><strong>Aether</strong><small>MARK-1 · CONTEXTCAL</small></span>
+      </a>
+      <div class="workspace-label">WORKSPACE</div>
+      <nav class="side-nav" aria-label="Main navigation">
+        <button class="nav-item active" data-page="tasks"><span class="nav-icon">▤</span><span>Tasks</span><span class="nav-count" id="nav-task-count">4</span></button>
+        <button class="nav-item" data-page="calendar"><span class="nav-icon">▦</span><span>Calendar</span></button>
+        <button class="nav-item" data-page="contextcal"><span class="nav-icon">✦</span><span>ContextCal</span></button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="engine-card"><span class="engine-pulse"></span><div><strong>Logic Engine</strong><small>Ready · Local demo</small></div><span class="engine-check">✓</span></div>
+        <div class="profile"><div class="avatar">A</div><div class="profile-copy"><strong>Personal workspace</strong><small>Local preview</small></div><button class="more-btn" aria-label="More options">···</button></div>
       </div>
+    </aside>
 
-      <div id="error-banner" class="error-banner" hidden></div>
+    <main class="main-area">
+      <header class="topbar">
+        <button class="mobile-menu" id="mobile-menu" aria-label="Toggle navigation">☰</button>
+        <div class="breadcrumb"><span>Workspace</span><span class="crumb-slash">/</span><strong id="breadcrumb-current">Tasks</strong></div>
+        <div class="topbar-actions"><span class="date-pill" id="today-pill">Today</span><button class="avatar avatar-small" aria-label="Profile">A</button></div>
+      </header>
 
-      <form id="task-form" class="task-form">
-        <div class="form-row">
-          <label>
-            Kind
-            <select id="f-kind" name="kind">
-              <option value="task">task</option>
-              <option value="event">event</option>
-            </select>
-          </label>
-          <label class="grow">
-            Title *
-            <input id="f-title" name="title" type="text" maxlength="500" required
-                   placeholder="e.g. Send weekly report">
-          </label>
-          <label>
-            Timezone
-            <select id="f-tz" name="tz">
-              <option value="Asia/Bangkok">Asia/Bangkok</option>
-              <option value="UTC">UTC</option>
-            </select>
-          </label>
+      <section class="page-view" id="tasks-page">
+        <div class="page-heading">
+          <div><p class="eyebrow">YOUR WORKSPACE</p><h1>Tasks <span class="heading-dot">.</span></h1><p class="subtitle">Keep your day clear, focused, and moving forward.</p></div>
+          <button class="button button-primary" id="open-create"><span class="button-plus">＋</span> Add task</button>
         </div>
-
-        <div class="form-row">
-          <label id="task-field">
-            Due date
-            <input id="f-due" name="due_date" type="date">
-          </label>
-          <label id="event-field" hidden>
-            Start
-            <input id="f-start" name="start_at" type="datetime-local">
-          </label>
-          <label id="event-field-2" hidden>
-            End
-            <input id="f-end" name="end_at" type="datetime-local">
-          </label>
+        <div class="summary-grid">
+          <article class="summary-card"><div class="summary-top"><span class="summary-label">All tasks</span><span class="summary-icon icon-violet">▤</span></div><strong id="stat-all">4</strong><small>Across your workspace</small></article>
+          <article class="summary-card"><div class="summary-top"><span class="summary-label">In progress</span><span class="summary-icon icon-blue">◷</span></div><strong id="stat-progress">2</strong><small>Keep the momentum</small></article>
+          <article class="summary-card"><div class="summary-top"><span class="summary-label">Completed</span><span class="summary-icon icon-green">✓</span></div><strong id="stat-completed">1</strong><small>Small wins add up</small></article>
+          <article class="summary-card"><div class="summary-top"><span class="summary-label">Due today</span><span class="summary-icon icon-amber">⌁</span></div><strong id="stat-today">2</strong><small>Stay on top of today</small></article>
         </div>
+        <section class="content-card">
+          <div class="content-toolbar"><div><h2>My tasks</h2><p class="muted">A simple view of what needs your attention.</p></div><div class="toolbar-controls"><label class="search-box"><span>⌕</span><input id="task-search" type="search" placeholder="Search tasks..." aria-label="Search tasks"></label><select id="task-filter" aria-label="Filter tasks"><option value="all">All tasks</option><option value="pending">Pending</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select></div></div>
+          <div class="task-list" id="task-list" aria-live="polite"></div>
+          <div class="empty-state" id="task-empty" hidden><div class="empty-icon">✓</div><strong>No tasks found</strong><p>Try a different filter or add a new task.</p></div>
+        </section>
+      </section>
 
-        <div class="form-row">
-          <label class="grow">
-            Description
-            <textarea id="f-desc" name="description" rows="2"
-                      placeholder="Optional details"></textarea>
-          </label>
+      <section class="page-view" id="calendar-page" hidden>
+        <div class="page-heading">
+          <div><p class="eyebrow">PLAN WITH CLARITY</p><h1>Calendar <span class="heading-dot">.</span></h1><p class="subtitle">See your schedule at a glance and make room for what matters.</p></div>
+          <button class="button button-primary" id="calendar-add"><span class="button-plus">＋</span> Add event</button>
         </div>
+        <section class="content-card calendar-card">
+          <div class="calendar-toolbar"><div><h2 id="calendar-title">October 2026</h2><p class="muted">Your schedule, all in one place.</p></div><div class="calendar-actions"><button class="icon-button" id="cal-prev" aria-label="Previous month">‹</button><button class="button button-light" id="cal-today">Today</button><button class="icon-button" id="cal-next" aria-label="Next month">›</button><div class="view-switch" aria-label="Calendar view"><button class="view-button active" data-view="month">Month</button><button class="view-button" data-view="week">Week</button><button class="view-button" data-view="day">Day</button></div></div></div>
+          <div class="calendar-weekdays"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div>
+          <div class="calendar-grid" id="calendar-grid"></div>
+          <div class="selected-day-panel" id="day-panel">
+            <div class="selected-day-head">
+              <div>
+                <span class="selected-day-label">SELECTED DAY</span>
+                <h3 id="selected-date-label">Today</h3>
+                <p class="selected-day-count" id="selected-day-count">0 items</p>
+              </div>
+              <div class="selected-day-actions">
+                <button class="button button-light" id="day-open-view" type="button">Open day view</button>
+                <button class="button button-primary" id="day-add-task" type="button"><span class="button-plus">＋</span> Add task</button>
+              </div>
+            </div>
+            <div class="day-feedback" id="day-loading" hidden>Loading day…</div>
+            <div class="day-feedback day-error" id="day-error" hidden>
+              <span id="day-error-message">Could not load this day.</span>
+              <button class="button button-light" id="day-retry" type="button">Retry</button>
+            </div>
+            <div class="selected-events" id="selected-events"></div>
+            <div class="day-empty" id="day-empty" hidden>
+              <div class="empty-icon">＋</div>
+              <strong>No tasks for this day</strong>
+              <p>Add a task to start planning this day.</p>
+              <button class="button button-primary" id="day-empty-add" type="button">+ Add task</button>
+            </div>
+          </div>
+        </section>
+      </section>
+      <section class="page-view" id="contextcal-page" hidden>
+        <div class="page-heading">
+          <div><p class="eyebrow">CONTEXTCAL</p><h1>Draft <span class="heading-dot">.</span></h1><p class="subtitle">Turn free text into tasks and events. Nothing is saved until you confirm.</p></div>
+        </div>
+        <section class="content-card cc-analyze-card">
+          <div class="cc-header"><h2>Analyze</h2><p class="muted">Paste notes, chat, or a plan — we’ll turn it into a draft for your review.</p></div>
+          <div class="cc-toolbar"><label class="field">Timezone<select id="cc-tz"><option value="Asia/Bangkok">Asia/Bangkok</option><option value="UTC">UTC</option></select></label></div>
+          <label class="field cc-textarea-field">Message<textarea id="cc-text" rows="6" placeholder="e.g. Meeting tomorrow 10:00-11:00, submit report Friday"></textarea></label>
+          <button class="button button-primary" id="cc-analyze" type="button">Analyze <span>→</span></button>
+          <div class="cc-feedback cc-loading" id="cc-loading" hidden>Analyzing…</div>
+          <div class="cc-feedback cc-error" id="cc-error" hidden><span id="cc-error-message">Could not analyze.</span></div>
+        </section>
+        <section class="content-card cc-draft-card" id="cc-draft-card" hidden>
+          <div class="cc-header"><h2>Draft</h2><p class="muted">Review each item, edit fields, then confirm.</p></div>
+          <div class="cc-draft-meta">
+            <span class="cc-badge cc-state-badge">Open</span>
+            <span class="cc-badge cc-expiry-badge" id="cc-expires">Expires: —</span>
+            <span class="cc-badge cc-id-badge" id="cc-draft-id">ID: —</span>
+          </div>
+          <div class="cc-items" id="cc-items"></div>
+          <div class="cc-actions">
+            <button class="button button-light" id="cc-discard" type="button">Discard draft</button>
+            <button class="button button-primary" id="cc-confirm" type="button">Confirm selected <span>→</span></button>
+          </div>
+          <div class="cc-feedback cc-loading" id="cc-confirm-loading" hidden>Confirming…</div>
+          <div class="cc-feedback cc-error" id="cc-confirm-error" hidden><span id="cc-confirm-error-message">Could not confirm.</span></div>
+          <div class="cc-outcomes" id="cc-outcomes"></div>
+        </section>
+        <footer class="app-footer"><span>Æ Aether Mark-1</span><span>Frontend preview · Mock data only</span></footer>
+    </main>
+  </div>
 
-        <div class="form-actions">
-          <button type="submit" id="save-btn">Add task</button>
-        </div>
+  <div class="modal-backdrop" id="task-modal" hidden>
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-header"><div><p class="eyebrow">WORKSPACE ITEM</p><h2 id="modal-title">Create a task</h2><p class="muted">Capture the details now. You can refine them later.</p></div><button class="modal-close" id="close-modal" aria-label="Close form">×</button></div>
+      <form id="create-form">
+        <div class="field-row"><label class="field">Type<select id="form-kind" name="kind"><option value="task">Task</option><option value="event">Event</option></select></label><label class="field field-wide">Title <span class="required">*</span><input id="form-title" name="title" required maxlength="160" placeholder="e.g. Prepare project update"></label></div>
+        <label class="field">Description <textarea id="form-description" name="description" rows="3" placeholder="Add a little more context..."></textarea></label>
+        <div class="field-row"><label class="field" id="due-field">Due date<input id="form-due" name="due_date" type="date"></label><label class="field" id="start-field" hidden>Start time<input id="form-start" name="start_at" type="datetime-local"></label><label class="field" id="end-field" hidden>End time<input id="form-end" name="end_at" type="datetime-local"></label></div>
+        <div class="form-note"><span>ⓘ</span> This preview uses mock data. Nothing is sent to the backend.</div>
+        <div class="modal-actions"><button type="button" class="button button-light" id="cancel-modal">Cancel</button><button type="submit" class="button button-primary">Create item <span>→</span></button></div>
       </form>
     </section>
+  </div>
 
-    <section class="panel">
-      <div class="panel-head">
-        <h2>Tasks</h2>
-        <button id="refresh-btn" type="button">Refresh</button>
+  <div class="modal-backdrop" id="detail-modal" hidden>
+    <section class="modal detail-modal" role="dialog" aria-modal="true" aria-labelledby="detail-title">
+      <div class="modal-header">
+        <div><p class="eyebrow">ITEM DETAILS</p><h2 id="detail-title">Item details</h2><p class="muted" id="detail-subtitle"></p></div>
+        <button class="modal-close" id="close-detail" aria-label="Close details">×</button>
       </div>
-
-      <div id="list-error" class="error-banner" hidden></div>
-
-      <table id="task-table" class="task-table" hidden>
-        <thead>
-          <tr>
-            <th>Title</th>
-            <th>Due / Start</th>
-            <th>Kind</th>
-            <th>Status</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody id="task-list"></tbody>
-      </table>
-
-      <p id="empty-state" class="muted" hidden>No tasks yet.</p>
-      <p id="loading-state" class="muted">Loading…</p>
+      <div class="detail-grid" id="detail-grid"></div>
+      <div class="modal-actions"><button type="button" class="button button-light" id="close-detail-footer">Close</button></div>
     </section>
-    </div>
-
-    <div id="calendar-view" hidden>
-      <section class="panel">
-        <div class="panel-head cal-head">
-          <button id="cal-prev" type="button" aria-label="Previous month">◀</button>
-          <h2 id="cal-label">Month</h2>
-          <div class="cal-head-right">
-            <button id="cal-today" type="button">Today</button>
-            <button id="cal-next" type="button" aria-label="Next month">▶</button>
-          </div>
-        </div>
-
-        <div id="list-error-cal" class="error-banner" hidden></div>
-
-        <div id="cal-grid" class="cal-grid" aria-label="Month grid"></div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-head">
-          <h2 id="cal-day-label">Pick a day</h2>
-        </div>
-        <ul id="cal-day-items" class="cal-day-items"></ul>
-        <p id="cal-day-empty" class="muted" hidden>No items on this day.</p>
-      </section>
-    </div>
-  </main>
-
-  <footer class="site-footer">
-    <a href="/health">health</a> · <a href="/docs">api docs</a>
-  </footer>
-
-  <script src="/static/app.js"></script>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="/static/app.js?v=4"></script>
 </body>
 </html>

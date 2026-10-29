@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 
 from aether.api.errors import register_exception_handlers
 from aether.api.middleware import add_security_middleware
-from aether.api.routes import calendar, tasks
+from aether.api.routes import calendar, contextcal, tasks
 from aether.api.schemas import HealthResponse
 from aether.core.service_container import ServiceContainer
 
@@ -80,6 +80,7 @@ def create_app(
     # Include routers with /api/v1 prefix
     app.include_router(tasks.router, prefix="/api/v1")
     app.include_router(calendar.router, prefix="/api/v1")
+    app.include_router(contextcal.router, prefix="/api/v1")
 
     # Health check endpoint (no auth, no host validation)
     @app.get("/health", response_model=None, include_in_schema=False)

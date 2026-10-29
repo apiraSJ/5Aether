@@ -1,0 +1,23 @@
+schema_version: 1
+system:
+  api_version: '1'
+  capabilities:
+  - ai
+  - tasks
+  - calendar
+  - memory
+  description: Aether intelligent calendar and task management system
+  entrypoint: systems.mark1.adapter:Mark1Adapter
+  id: aether.mark1
+  lifecycle:
+    health_check: required
+    start: required
+    stop: required
+  menu:
+    category: Aether
+    order: 10
+    visible: true
+  name: Aether Mark-1
+  requires:
+    platform_api: '>=1.0,<2.0'
+  version: 1.0.0

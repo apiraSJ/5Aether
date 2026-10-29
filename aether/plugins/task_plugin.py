@@ -42,13 +42,16 @@ from typing import Any, Dict, Optional
 
 from aether.core.command import Command
 from aether.core.command_registry import CommandInfo, CommandRegistry
-from aether.core.event_bus_v2 import Event
+from aether.core.event_bus import Event, EventCategory
 from aether.core.event_type import EventType
 from aether.core.plugin import PluginBase, PluginMetadata
 from aether.core.service_container import ServiceContainer
 from aether.task import calendar_query, json_adapter
 from aether.task.calendar_query import day_view, month_view, views_to_dicts, week_view
-from aether.task.models import DEFAULT_TZ, ItemKind, ItemStatus, item_to_dict
+from aether.task import extraction
+from aether.task.contextcal import ContextCalService
+from aether.task.drafts import DraftStore
+from aether.task.models import DEFAULT_TZ, InternalStatus, ItemKind, ItemStatus, ReviewState, item_to_dict
 from aether.task.repository import SqliteScheduleRepository
 from aether.task.service import ScheduleError, ScheduleService
 
@@ -110,6 +113,36 @@ _TASK_COMMANDS = [
         params_help="<path> [on_conflict=review|update|skip]",
         examples=("task.import path=data/backup.json", "task.import path=data/backup.json on_conflict=update"),
     ),
+    CommandInfo(
+        name="task.extract",
+        description="Extract schedule items from free text (deterministic)",
+        category="task",
+        params_help="text=<...>",
+    ),
+    CommandInfo(
+        name="task.review.list",
+        description="List review queue",
+        category="task",
+        params_help="[state=pending|confirmed|rejected|edited]",
+    ),
+    CommandInfo(
+        name="task.review.confirm",
+        description="Confirm a pending review",
+        category="task",
+        params_help="<review_id>",
+    ),
+    CommandInfo(
+        name="task.review.edit",
+        description="Edit and confirm a pending review",
+        category="task",
+        params_help="<review_id> [title] [due_date] [start_at] [end_at] [all_day] [owner] [description] [tz]",
+    ),
+    CommandInfo(
+        name="task.review.reject",
+        description="Reject a pending review (deletes item)",
+        category="task",
+        params_help="<review_id>",
+    ),
 ]
 
 _UPDATE_PARAM_FIELDS = ("title", "description", "due_date", "start_at", "end_at", "owner", "tz", "source")
@@ -145,12 +178,19 @@ class TaskPlugin(PluginBase):
         self._command_bus = None
         self._repo: Optional[SqliteScheduleRepository] = None
         self._service: Optional[ScheduleService] = None
+        self._drafts: Optional[DraftStore] = None
+        self._contextcal: Optional[ContextCalService] = None
         self._db_path: str = "data/tasks.db"
 
     @property
     def schedule_service(self) -> Optional[ScheduleService]:
         """The shared ScheduleService instance (single write path)."""
         return self._service
+
+    @property
+    def contextcal_service(self) -> Optional[ContextCalService]:
+        """The shared ContextCalService instance."""
+        return self._contextcal
 
     @property
     def metadata(self) -> PluginMetadata:
@@ -173,11 +213,14 @@ class TaskPlugin(PluginBase):
 
         self._repo = SqliteScheduleRepository(self._db_path)
         self._service = ScheduleService(self._repo)
+        self._drafts = DraftStore()
+        self._contextcal = ContextCalService(self._service, self._drafts, repository=self._repo)
 
         self._register_commands()
 
         container.register_instance("schedule_repository", self._repo)
         container.register_instance("schedule_service", self._service)
+        container.register_instance("contextcal_service", self._contextcal)
         container.register_instance("calendar_query", calendar_query)
 
         logger.info("TaskPlugin initialized (db: %s)", self._db_path)
@@ -188,7 +231,8 @@ class TaskPlugin(PluginBase):
         if self._event_bus:
             try:
                 self._event_bus.publish(Event(
-                    type=EventType.TASK_READY,
+                    name=EventType.TASK_READY.value,
+                    category=EventCategory.DATA,
                     payload={
                         "db_path": self._db_path,
                         "items": self._repo.count() if self._repo else 0,
@@ -232,6 +276,11 @@ class TaskPlugin(PluginBase):
             self._command_bus.register_handler("task.calendar", self._handle_calendar)
             self._command_bus.register_handler("task.export", self._handle_export)
             self._command_bus.register_handler("task.import", self._handle_import)
+            self._command_bus.register_handler("task.extract", self._handle_extract)
+            self._command_bus.register_handler("task.review.list", self._handle_review_list)
+            self._command_bus.register_handler("task.review.confirm", self._handle_review_confirm)
+            self._command_bus.register_handler("task.review.edit", self._handle_review_edit)
+            self._command_bus.register_handler("task.review.reject", self._handle_review_reject)
 
     # ── Publish helpers (post-commit only) ─────────────────────────
 
@@ -239,7 +288,7 @@ class TaskPlugin(PluginBase):
         if not self._event_bus:
             return
         try:
-            self._event_bus.publish(Event(type=event_type, payload=payload, source=self.name))
+            self._event_bus.publish(Event(name=event_type.value, category=EventCategory.DATA, payload=payload, source=self.name))
         except Exception as e:
             logger.warning("Failed to publish %s: %s", event_type, e)
 
@@ -520,3 +569,139 @@ class TaskPlugin(PluginBase):
             return {"ok": False, "error": f"import failed and was rolled back: {e}"}
 
         return result.as_dict()
+
+    def _handle_extract(self, command: Command) -> dict:
+        if not self._service or not self._repo:
+            return {"ok": False, "error": "task system not initialized"}
+        p = command.params
+        text = _opt(p.get("text")) or ""
+        if not text:
+            return {"ok": False, "error": "text is required"}
+        candidates = extraction.extract(text)
+        created = []
+        needs_confirmation = []
+        try:
+            with self._repo.transaction():
+                import time, hashlib
+                content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+                # Check dedup
+                existing = self._repo.find_batch_by_hash(content_hash)
+                if existing is not None:
+                    return {"ok": True, "deduplicated": True, "batch_id": existing.id, "created": 0, "needs_confirmation": 0}
+                batch_id = f"imp_{hashlib.sha256((text+str(time.time())).encode('utf-8')).hexdigest()[:12]}"
+                stats = {"created": 0, "needs_confirmation": 0}
+                for cand in candidates:
+                    if cand.needs_review:
+                        item = self._service.create(
+                            cand.kind,
+                            cand.title,
+                            description=cand.description,
+                            due_date=cand.due_date,
+                            start_at=cand.start_at,
+                            end_at=cand.end_at,
+                            all_day=cand.all_day,
+                            tz=cand.tz or DEFAULT_TZ,
+                            source="extraction",
+                            internal_status=InternalStatus.NEEDS_CONFIRMATION,
+                            actor=str(command.source or "extract"),
+                        )
+                        from aether.task.models import ReviewEntry, ReviewState
+                        review = ReviewEntry(
+                            item_id=item.id,
+                            reason=cand.review_reason or "needs confirmation",
+                            payload={**cand.review_payload, "kind": "extraction"},
+                            confidence=cand.confidence,
+                            state=ReviewState.PENDING,
+                        )
+                        self._repo.enqueue_review(review)
+                        self._service.attach_evidence(item.id, source="chat", source_ref="extraction", excerpt=cand.raw_excerpt or text, confidence=cand.confidence)
+                        needs_confirmation.append({"item_id": item.id, "review_id": review.id})
+                        stats["needs_confirmation"] += 1
+                    else:
+                        item = self._service.create(
+                            cand.kind,
+                            cand.title,
+                            description=cand.description,
+                            due_date=cand.due_date,
+                            start_at=cand.start_at,
+                            end_at=cand.end_at,
+                            all_day=cand.all_day,
+                            tz=cand.tz or DEFAULT_TZ,
+                            source="extraction",
+                            actor=str(command.source or "extract"),
+                        )
+                        self._service.attach_evidence(item.id, source="chat", source_ref="extraction", excerpt=cand.raw_excerpt or text, confidence=cand.confidence)
+                        created.append({"item_id": item.id})
+                        stats["created"] += 1
+                from aether.task.models import ImportBatch
+                batch = ImportBatch(
+                    id=batch_id,
+                    source="extraction",
+                    format_version="1",
+                    content_hash=content_hash,
+                    item_count=len(candidates),
+                    stats=stats,
+                )
+                self._repo.record_batch(batch)
+        except Exception as e:
+            return {"ok": False, "error": f"extraction failed and was rolled back: {e}"}
+        return {"ok": True, "created": created, "needs_confirmation": needs_confirmation, "count": len(candidates)}
+
+    def _handle_review_list(self, command: Command) -> dict:
+        if not self._service:
+            return {"ok": False, "error": "task system not initialized"}
+        p = command.params
+        state = None
+        state_text = _opt(p.get("state"))
+        if state_text:
+            try:
+                state = ReviewState(state_text.lower())
+            except ValueError:
+                return {"ok": False, "error": f"invalid state: {state_text!r}"}
+        reviews = self._service.list_reviews(state) if state is not None else self._service.list_pending_reviews()
+        return {"ok": True, "reviews": [{"id": r.id, "item_id": r.item_id, "reason": r.reason, "payload": r.payload, "confidence": r.confidence, "state": r.state.value} for r in reviews]}
+
+    def _handle_review_confirm(self, command: Command) -> dict:
+        if not self._service:
+            return {"ok": False, "error": "task system not initialized"}
+        review_id = _opt(command.params.get("review_id")) or _opt(command.params.get("id"))
+        if not review_id:
+            return {"ok": False, "error": "review_id is required"}
+        try:
+            res = self._service.resolve_review(review_id, "confirm", actor=str(command.source or "user"))
+            return res
+        except ScheduleError as e:
+            return {"ok": False, "error": str(e)}
+
+    def _handle_review_edit(self, command: Command) -> dict:
+        if not self._service:
+            return {"ok": False, "error": "task system not initialized"}
+        review_id = _opt(command.params.get("review_id")) or _opt(command.params.get("id"))
+        if not review_id:
+            return {"ok": False, "error": "review_id is required"}
+        p = command.params
+        corrected = {}
+        for field in _UPDATE_PARAM_FIELDS:
+            if field in p:
+                value = _opt(p.get(field))
+                if value is not None:
+                    corrected[field] = value
+        if "all_day" in p:
+            corrected["all_day"] = _as_bool(p.get("all_day"))
+        try:
+            res = self._service.resolve_review(review_id, "edit", corrected_fields=corrected, actor=str(command.source or "user"))
+            return res
+        except ScheduleError as e:
+            return {"ok": False, "error": str(e)}
+
+    def _handle_review_reject(self, command: Command) -> dict:
+        if not self._service:
+            return {"ok": False, "error": "task system not initialized"}
+        review_id = _opt(command.params.get("review_id")) or _opt(command.params.get("id"))
+        if not review_id:
+            return {"ok": False, "error": "review_id is required"}
+        try:
+            res = self._service.resolve_review(review_id, "reject", actor=str(command.source or "user"))
+            return res
+        except ScheduleError as e:
+            return {"ok": False, "error": str(e)}

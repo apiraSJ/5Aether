@@ -415,6 +415,7 @@ def import_data(
                         "existing": item_to_dict(existing),
                         "incoming": item_to_dict(incoming),
                         "on_conflict": "review",
+                        "kind": "import_conflict",
                     },
                     confidence=0.5,
                     state=ReviewState.PENDING,
