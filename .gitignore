@@ -47,3 +47,14 @@ aether/data/
 data/layouts/last*.json
 data/layouts/test_*.json
 tests/_test_shutdown/
+
+# Hallmark design skill (installed per-project) + its lint records
+.agents/
+.hallmark/
+
+# Ad-hoc archives and debugging scratch (not source)
+*.zip
+*.rar
+_tmp_*.py
+folder_structure.txt
+tools/_old_render.txt
