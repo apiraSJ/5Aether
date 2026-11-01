@@ -791,6 +791,9 @@
   });
   $$(".nav-item").forEach(btn=>btn.addEventListener("click",()=>setPage(btn.dataset.page)));
   $("#mobile-menu").addEventListener("click",()=>$("#sidebar").classList.toggle("open"));
+  $(".drawer-backdrop").addEventListener("click",()=>$("#sidebar").classList.remove("open"));
+  $(".drawer-close").addEventListener("click",()=>$("#sidebar").classList.remove("open"));
+  window.addEventListener("keydown",e=>{if(e.key==="Escape")$("#sidebar").classList.remove("open");});
   $("#task-search").addEventListener("input",renderTasks);$("#task-filter").addEventListener("change",renderTasks);
   $("#cal-prev").addEventListener("click",()=>{calendarAnchor=calendarView==="week"?plusDays(calendarAnchor,-7):calendarView==="day"?plusDays(calendarAnchor,-1):new Date(calendarAnchor.getFullYear(),calendarAnchor.getMonth()-1,1);selectedDate=dateKey(calendarAnchor);renderCalendar();});
   $("#cal-next").addEventListener("click",()=>{calendarAnchor=calendarView==="week"?plusDays(calendarAnchor,7):calendarView==="day"?plusDays(calendarAnchor,1):new Date(calendarAnchor.getFullYear(),calendarAnchor.getMonth()+1,1);selectedDate=dateKey(calendarAnchor);renderCalendar();});
