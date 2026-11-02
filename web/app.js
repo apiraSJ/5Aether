@@ -370,7 +370,7 @@
       check.type="button";
       check.disabled=item.status!=="pending";
       check.setAttribute("aria-label",item.status==="pending"?"Mark task completed":statusLabel(item));
-      check.textContent=item.status==="completed"?"✓":"";
+      const checkMark=document.createElement("span");checkMark.className="task-check-box";checkMark.textContent=item.status==="completed"?"✓":"";check.append(checkMark);
       check.addEventListener("click",async()=>{
         if(item.status!=="pending") return;
         try{await repository.complete(item.id);await refresh();showToast("Task completed");}
