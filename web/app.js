@@ -380,7 +380,7 @@
       const title=document.createElement("span");title.className="task-title";title.textContent=item.title;
       const desc=document.createElement("span");desc.className="task-description";desc.textContent=item.description||"No description";
       copy.append(title,desc);main.append(check,copy);
-      const meta=document.createElement("div");meta.className="task-meta";meta.innerHTML=`<strong>${item.kind==="event"?"SCHEDULE":"DUE DATE"}</strong>${escapeHtml(itemTime(item))}`;
+      const meta=document.createElement("div");meta.className="task-meta";meta.innerHTML=`<strong>${item.kind==="event"?"Schedule":"Due date"}</strong>${escapeHtml(itemTime(item))}`;
       const badge=document.createElement("span");badge.className=`status-badge ${statusClass(item)}`;badge.textContent=statusLabel(item);
       const menu=document.createElement("button");menu.className="task-menu";menu.type="button";menu.textContent="···";menu.setAttribute("aria-label",`Delete ${item.title}`);
       menu.addEventListener("click",async()=>{
@@ -558,11 +558,27 @@
     $("#cc-draft-card").hidden=true;
     $("#cc-outcomes").replaceChildren();
     contextcalDraft=null;contextcalSelections={};contextcalEditingId=null;
+    setCCStep("analyze");
+  }
+  function setCCStep(state){
+    $$(".cc-step").forEach(step=>{
+      const key=step.dataset.step;
+      step.classList.remove("is-active","is-done");
+      if(state==="analyze"){
+        if(key==="analyze") step.classList.add("is-active");
+      }else if(state==="draft"){
+        if(key==="analyze") step.classList.add("is-done");
+        if(key==="draft") step.classList.add("is-active");
+      }else if(state==="confirmed"){
+        step.classList.add("is-done");
+      }
+    });
   }
   function renderDraft(){
     if(!contextcalDraft){$("#cc-draft-card").hidden=true;return;}
     const {draft}=contextcalDraft;
     $("#cc-draft-card").hidden=false;
+    setCCStep("draft");
     $("#cc-draft-id").textContent=`ID: ${draft.draft_id}`;
     const expires=new Date(draft.expires_at*1000);
     $("#cc-expires").textContent=`Expires: ${prettyDate(expires,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})}`;
@@ -875,7 +891,7 @@
       if(result.committed){
         await refresh();
         showToast(`Confirmed — ${result.created_item_ids.length} item${result.created_item_ids.length===1?"":"s"} created`);
-        if(currentPage==="contextcal")renderDraft();
+        if(currentPage==="contextcal"){renderDraft();setCCStep("confirmed");}
       }else{
         showToast("Some items could not be confirmed (see outcomes)");
       }
