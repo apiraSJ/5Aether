@@ -637,7 +637,6 @@ h1{font-size:var(--fs-display)}
 @keyframes slideInRight{from{transform:translateX(100%)}to{transform:translateX(0)}}
 @keyframes slideInUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
 .task-row{outline:none}
-`
 /* S4-C · Calendar */
 /* D3 split: calendar work surfaces on bone */
 .calendar-toolbar{background:var(--bone);border:1px solid var(--bone-rule);border-radius:var(--radius-lg);padding:12px 16px;color:var(--bone-ink)}
@@ -706,4 +705,76 @@ h1{font-size:var(--fs-display)}
   .calendar-actions .icon-button{width:32px;height:32px;font-size:16px}
   .calendar-actions .button{padding:6px 8px;font-size:10px}
 }
-`
+/* S4-D · ContextCal */
+:root{--danger:oklch(62% .18 25);--danger-ink:oklch(40% .16 25);--danger-soft:oklch(62% .18 25 / .12);--danger-soft-2:oklch(62% .18 25 / .10);--danger-text:oklch(55% .16 25);--danger-border:oklch(62% .18 25 / .3);--danger-border-2:oklch(62% .18 25 / .3)}
+/* D3 split: both cards on bone */
+.cc-analyze-card{background:var(--bone);border:1px solid var(--bone-rule);color:var(--bone-ink);box-shadow:var(--shadow-card);backdrop-filter:none}
+.cc-draft-card{background:var(--bone);border:1px solid var(--bone-rule);color:var(--bone-ink);box-shadow:var(--shadow-card);backdrop-filter:none}
+.cc-analyze-card .cc-header h2{font-size:var(--fs-h2);color:var(--bone-ink)}
+.cc-analyze-card .cc-header p{font-size:var(--fs-ui);color:var(--bone-muted)}
+.cc-draft-card .cc-header h2{font-size:var(--fs-h2);color:var(--bone-ink)}
+.cc-draft-card .cc-header p{font-size:var(--fs-ui);color:var(--bone-muted)}
+/* workflow spine: step strip */
+.cc-steps{position:relative;gap:10px;margin:0 0 18px}
+.cc-steps::before{content:"";position:absolute;top:50%;left:8px;right:8px;height:1px;background:var(--bone-rule);z-index:0}
+.cc-step{position:relative;z-index:1;font-size:var(--fs-ui);padding:10px 12px;background:var(--bone-surface-2);border:1px solid var(--bone-rule);color:var(--bone-muted);transition:background var(--dur-card) var(--ease-out),border-color var(--dur-card) var(--ease-out),box-shadow var(--dur-card) var(--ease-out)}
+.cc-step-num{font-family:var(--font-display);font-size:18px;font-weight:600;color:var(--bone-muted);letter-spacing:-.02em}
+.cc-step-label{font-weight:600}
+.cc-step.is-active{background:var(--peri-soft);border-color:var(--peri);color:var(--peri-ink);box-shadow:0 0 0 3px var(--peri-soft)}
+.cc-step.is-active .cc-step-num{color:var(--peri)}
+.cc-step.is-done{background:var(--peri-soft);border-color:var(--peri-border);color:var(--peri-ink)}
+.cc-step.is-done .cc-step-num{color:var(--peri)}
+.cc-step.is-done::after{content:" ✓";color:var(--peri);font-weight:700}
+/* composer */
+.cc-analyze-card .cc-toolbar{margin-bottom:14px}
+.cc-analyze-card .cc-toolbar label{font-size:var(--fs-ui);color:var(--bone-ink)}
+.cc-analyze-card .cc-toolbar select{background:var(--bone-surface-2);border:1px solid var(--bone-border-strong);color:var(--bone-ink);padding:8px 10px;border-radius:8px;font-size:var(--fs-ui)}
+.cc-analyze-card .cc-textarea-field{margin-bottom:14px}
+.cc-analyze-card .cc-textarea-field label{font-size:var(--fs-ui);color:var(--bone-ink);font-weight:600}
+.cc-analyze-card .cc-textarea-field textarea{min-height:160px;padding:14px 16px;font-size:16px;line-height:1.55;background:var(--bone-surface-2);border:1px solid var(--bone-border-strong);color:var(--bone-ink);border-radius:10px;transition:border-color var(--dur-hover) var(--ease-out),box-shadow var(--dur-hover) var(--ease-out)}
+.cc-analyze-card .cc-textarea-field textarea:focus{border-color:var(--peri);box-shadow:0 0 0 3px var(--peri-soft);outline:none}
+.cc-analyze-card .button-primary{background:var(--peri);color:var(--peri-ink);padding:11px 18px;font-size:var(--fs-ui);border-radius:10px}
+.cc-analyze-card .button-primary:hover{filter:brightness(1.06)}
+.cc-feedback{font-size:var(--fs-ui);padding:10px 13px;border-radius:8px}
+.cc-feedback.cc-loading{background:var(--bone-surface-2);color:var(--bone-muted);border:1px solid var(--bone-rule)}
+.cc-feedback.cc-error{background:var(--danger-soft-2);color:var(--danger-text);border:1px solid var(--danger-border)}
+/* draft as document */
+.cc-draft-card{margin-top:18px}
+.cc-draft-meta{gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.cc-draft-meta .cc-badge{padding:4px 9px;font-size:11px;border-radius:6px;background:var(--bone-surface-2);border:1px solid var(--bone-rule);color:var(--bone-ink)}
+.cc-draft-meta .cc-state-badge{background:var(--peri-soft);border-color:var(--peri-border);color:var(--peri-ink)}
+.cc-items{gap:12px}
+.cc-item{padding:16px 18px;background:var(--bone-surface-2);border:1px solid var(--bone-rule);border-radius:10px}
+.cc-item:hover{background:var(--bone-hover)}
+.cc-item-header{margin-bottom:8px;gap:8px;align-items:center}
+.cc-item-title{font-size:var(--fs-h3);margin:0 0 4px;color:var(--bone-ink);font-weight:600}
+.cc-item-desc{font-size:var(--fs-meta);margin:0 0 10px;color:var(--bone-muted);line-height:1.45}
+.cc-item-fields{gap:10px}
+.cc-item-field{gap:4px}
+.cc-item-field label{font-size:var(--fs-meta);color:var(--bone-muted);font-weight:600}
+.cc-item-field input,.cc-item-field select{padding:8px 10px;font-size:var(--fs-ui);background:var(--bone);border:1px solid var(--bone-border-strong);color:var(--bone-ink);border-radius:8px}
+.cc-missing-chip{padding:3px 7px;font-size:10px;background:var(--apricot-soft);color:var(--apricot-ink);border:1px solid var(--apricot-border);border-radius:4px}
+.cc-actions{gap:10px;margin-top:16px}
+.cc-actions .button{padding:10px 16px;font-size:var(--fs-ui);border-radius:10px}
+.cc-actions .button-light{background:var(--bone-surface-2);border:1px solid var(--bone-rule);color:var(--bone-ink)}
+.cc-outcomes{margin-top:14px;gap:8px}
+.cc-outcome{padding:9px 12px;font-size:var(--fs-ui);background:var(--bone-surface-2);border:1px solid var(--bone-rule);border-radius:8px;color:var(--bone-ink)}
+/* mobile */
+@media (max-width:768px){
+  .cc-steps{grid-template-columns:1fr;gap:8px}
+  .cc-steps::before{display:none}
+  .cc-step{padding:9px 11px}
+  .cc-step-num{font-size:16px}
+  .cc-analyze-card{padding:16px 18px}
+  .cc-analyze-card .cc-textarea-field textarea{min-height:130px;font-size:15px}
+  .cc-draft-card{padding:16px 18px}
+  .cc-item-fields{grid-template-columns:1fr}
+  .cc-actions{flex-direction:column}
+  .cc-actions .button{width:100%}
+  .cc-draft-meta{flex-direction:column;align-items:flex-start}
+}
+@media (max-width:400px){
+  .cc-analyze-card{padding:14px 16px}
+  .cc-draft-card{padding:14px 16px}
+  .cc-item{padding:14px 16px}
+}
