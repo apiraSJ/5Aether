@@ -696,7 +696,7 @@
         // Reset button per field
         const resetBtn=document.createElement("button");resetBtn.type="button";
         resetBtn.textContent="Reset";resetBtn.className="button button-light";
-        resetBtn.style.cssText="font-size:9px;padding:2px 6px;margin-top:2px;align-self:flex-start";
+        resetBtn.style.cssText="font-size:12px;padding:2px 6px;margin-top:2px;align-self:flex-start";
         resetBtn.addEventListener("click",()=>{
           const curSel=contextcalSelections[ditem.draft_item_id]||{accept:true,fields:{}};
           const newFields={...(curSel.fields||{})};
