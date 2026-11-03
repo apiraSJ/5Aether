@@ -389,6 +389,16 @@
         try{await repository.remove(item.id);await refresh();showToast("Item deleted from demo");}
         catch(error){showToast(`Could not delete item: ${error.message}`);}
       });
+      row.tabIndex=0;
+      row.addEventListener("click",(e)=>{
+        if(e.target.closest("button,input,a,select")) return;
+        openDetail(item);
+        $$(".task-row").forEach(r=>r.classList.remove("is-selected"));
+        row.classList.add("is-selected");
+      });
+      row.addEventListener("keydown",(e)=>{
+        if(e.key==="Enter"||e.key===" "){e.preventDefault();row.click();}
+      });
       row.append(main,meta,badge,menu);list.append(row);
     });
     $("#task-empty").hidden=visible.length!==0;
@@ -514,16 +524,16 @@
       ["Due date",item.due_date||"—"],
       ["Start",formatDateTime(item.start_at)],
       ["End",formatDateTime(item.end_at)],
-      ["All day",item.all_day?"Yes":"No"],
-      ["Timezone",item.tz||"Asia/Bangkok"],
       ["Description",item.description||"—"],
-      ["Source",item.source||"manual"],
-      ["ID",item.id||"—"]
+      ["All day",item.all_day?"Yes":"No"],
+      ["Timezone",item.tz||"Asia/Bangkok",true],
+      ["Source",item.source||"manual",true],
+      ["ID",item.id||"—",true]
     ];
     const grid=$("#detail-grid");grid.replaceChildren();
-    rows.forEach(([label,value])=>{
+    rows.forEach(([label,value,secondary])=>{
       const row=document.createElement("div");
-      row.className=`detail-row${label==="Description"?" full":""}`;
+      row.className=`detail-row${label==="Description"?" full":""}${secondary?" detail-row--secondary":""}`;
       const key=document.createElement("span");key.textContent=label;
       const val=document.createElement("strong");val.textContent=value;
       if(label==="ID") val.classList.add("detail-id");
@@ -534,11 +544,13 @@
   }
   function closeDetail(){
     $("#detail-modal").hidden=true;
+    $$(".task-row").forEach(r=>r.classList.remove("is-selected"));
     syncBodyLock();
   }
 
   function setPage(page){
     currentPage=page;
+    if(page!=="tasks" && page!=="calendar") closeDetail();
     $("#tasks-page").hidden=page!=="tasks";
     $("#calendar-page").hidden=page!=="calendar";
     $("#contextcal-page").hidden=page!=="contextcal";
