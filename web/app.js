@@ -378,8 +378,9 @@
       });
       const copy=document.createElement("div");copy.className="task-copy";
       const title=document.createElement("span");title.className="task-title";title.textContent=item.title;
-      const desc=document.createElement("span");desc.className="task-description";desc.textContent=item.description||"No description";
-      copy.append(title,desc);main.append(check,copy);
+      copy.append(title);
+      if(item.description){const desc=document.createElement("span");desc.className="task-description";desc.textContent=item.description;copy.append(desc);}
+      main.append(check,copy);
       const meta=document.createElement("div");meta.className="task-meta";meta.innerHTML=`<strong>${item.kind==="event"?"Schedule":"Due date"}</strong>${escapeHtml(itemTime(item))}`;
       const badge=document.createElement("span");badge.className=`status-badge ${statusClass(item)}`;badge.textContent=statusLabel(item);
       const menu=document.createElement("button");menu.className="task-menu";menu.type="button";menu.textContent="···";menu.setAttribute("aria-label",`Delete ${item.title}`);
