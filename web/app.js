@@ -313,6 +313,13 @@
     const toast=$("#toast");toast.textContent=message;toast.classList.add("show");
     clearTimeout(toastTimer);toastTimer=setTimeout(()=>toast.classList.remove("show"),2600);
   };
+  // Toggle a button's busy state (spinner + disabled) for visible click feedback.
+  const setBusy = (button, busy) => {
+    if (!button) return;
+    button.disabled = !!busy;
+    button.classList.toggle("is-loading", !!busy);
+    button.setAttribute("aria-busy", busy ? "true" : "false");
+  };
   const syncBodyLock = () => {
     const open = !$("#task-modal").hidden || !$("#detail-modal").hidden;
     document.body.style.overflow = open ? "hidden" : "";
@@ -458,7 +465,8 @@
     dayItems.slice(0,max).forEach(item=>{
       const ev=document.createElement("button");ev.type="button";ev.className="calendar-event";
       ev.classList.add(item.status==="cancelled"?"event-grey":item.kind==="event"?"event-blue":item.status==="completed"?"event-green":"event-amber");
-      ev.textContent=item.title;ev.title=item.title;
+      ev.textContent=item.kind==="event"&&item.start_at&&/T\d{2}:\d{2}/.test(item.start_at)?`${itemTime(item)} ${item.title}`:item.title;
+      ev.title=`${item.kind==="event"?"Event":"Task"} · ${item.title}`;
       ev.addEventListener("click",e=>{e.stopPropagation();selectDate(key);openDetail(item);});
       cell.append(ev);
     });
@@ -541,6 +549,8 @@
     });
     $("#detail-modal").hidden=false;
     syncBodyLock();
+    const closeBtn=$("#close-detail");
+    if(closeBtn) closeBtn.focus();
   }
   function closeDetail(){
     $("#detail-modal").hidden=true;
@@ -563,7 +573,7 @@
 
   // ---------- ContextCal ----------
   function renderContextCalPage(){
-    $("#cc-analyze").disabled=false;
+    setBusy($("#cc-analyze"),false);
     $("#cc-text").disabled=false;
     $("#cc-tz").disabled=false;
     $("#cc-loading").hidden=true;
@@ -597,7 +607,7 @@
     $("#cc-expires").textContent=`Expires: ${prettyDate(expires,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})}`;
     const stateBadge=$("#cc-draft-card .cc-state-badge");
     stateBadge.textContent=draft.state.charAt(0).toUpperCase()+draft.state.slice(1);
-    stateBadge.className=`cc-badge cc-state-badge ${draft.state==="open"?"":draft.state==="confirmed"?"cc-state-badge":"cc-state-badge"}`;
+    stateBadge.className=`cc-badge cc-state-badge state-${String(draft.state).replace(/[^a-z-]/gi,"")}`;
     renderContextCalItems();
   }
   function normalizeForInput(value, kind){
@@ -630,7 +640,7 @@
       const isEdited=editedKeys.length>0;
       const card=document.createElement("div");card.className="cc-item";
       const header=document.createElement("div");header.className="cc-item-header";
-      const accept=document.createElement("input");accept.type="checkbox";accept.checked=!!sel.accept;
+      const accept=document.createElement("input");accept.type="checkbox";accept.className="cc-item-accept";accept.checked=!!sel.accept;
       accept.setAttribute("aria-label",`Accept ${cand.title}`);
       accept.addEventListener("change",()=>{
         const cur=contextcalSelections[ditem.draft_item_id]||sel;
@@ -679,7 +689,7 @@
         i.value=normalizeForInput(shownVal, fd.type);
         // mark edited
         const isFieldEdited = editedVal!==undefined&&editedVal!==null&&String(editedVal).trim()!=="" && String(editedVal).trim()!==String(origVal).trim();
-        if(isFieldEdited){ i.style.borderColor="#b77b18"; i.style.background="#fffaf0"; }
+        if(isFieldEdited){ i.classList.add("is-edited"); }
         i.addEventListener("input",()=>{
           const v=i.value.trim();
           const curSel=contextcalSelections[ditem.draft_item_id]||{accept:true,fields:{}};
@@ -695,8 +705,7 @@
         });
         // Reset button per field
         const resetBtn=document.createElement("button");resetBtn.type="button";
-        resetBtn.textContent="Reset";resetBtn.className="button button-light";
-        resetBtn.style.cssText="font-size:12px;padding:2px 6px;margin-top:2px;align-self:flex-start";
+        resetBtn.textContent="Reset";resetBtn.className="button button-light button-xs";
         resetBtn.addEventListener("click",()=>{
           const curSel=contextcalSelections[ditem.draft_item_id]||{accept:true,fields:{}};
           const newFields={...(curSel.fields||{})};
@@ -709,7 +718,7 @@
       });
 
       // Per-item reset all edits
-      const actions=document.createElement("div");actions.style.display="flex";actions.style.gap="8px";actions.style.marginTop="8px";actions.style.flexWrap="wrap";
+      const actions=document.createElement("div");actions.className="cc-item-actions";
       const resetAllBtn=document.createElement("button");resetAllBtn.type="button";resetAllBtn.className="button button-light";resetAllBtn.textContent="Reset all edits";
       resetAllBtn.addEventListener("click",()=>{
         const cur=contextcalSelections[ditem.draft_item_id]||sel;
@@ -731,14 +740,14 @@
     if(!result.outcomes||result.outcomes.length===0){
       if(result.committed){
         const empty=document.createElement("div");empty.className="cc-outcome ok";
-        empty.innerHTML=`<span class="cc-outcome-kind">Confirmed</span><div class="cc-outcome-item">All selected items saved.</div><span class="cc-outcome-id">IDs: ${(result.created_item_ids||[]).join(", ")||"—"}</span>`;
+        empty.innerHTML=`<span class="cc-outcome-kind">Confirmed</span><div class="cc-outcome-item">All selected items saved.</div><span class="cc-outcome-id">IDs: ${escapeHtml((result.created_item_ids||[]).join(", ")||"—")}</span>`;
         wrap.append(empty);
       }
       return;
     }
     result.outcomes.forEach(o=>{
       const div=document.createElement("div");div.className=`cc-outcome ${o.ok?"ok":"error"}`;
-      div.innerHTML=`<span class="cc-outcome-kind">${o.ok?"Created":"Rejected"}</span><div class="cc-outcome-item">${o.item_id||(o.error||"")}</div><span class="cc-outcome-id">${o.draft_item_id}</span>`;
+      div.innerHTML=`<span class="cc-outcome-kind">${o.ok?"Created":"Rejected"}</span><div class="cc-outcome-item">${escapeHtml(o.item_id||(o.error||""))}</div><span class="cc-outcome-id">${escapeHtml(o.draft_item_id)}</span>`;
       wrap.append(div);
     });
   }
@@ -807,6 +816,9 @@
       if(!data.start_at||!data.end_at){showToast("Please add start and end times");return;}
       if(new Date(data.end_at)<new Date(data.start_at)){showToast("End time must be after start time");return;}
     } else data.due_date=$("#form-due").value||null;
+    const submitBtn=$("#create-form button[type='submit']");
+    if(submitBtn&&submitBtn.disabled) return;
+    setBusy(submitBtn,true);
     try{
       await repository.create(data);
       if(kind==="event"){
@@ -816,6 +828,8 @@
       await refresh();closeModal();showToast(kind==="event"?"Event added to demo calendar":"Task added to demo list");
     }catch(error){
       showToast(`Could not save: ${error.message}`);
+    }finally{
+      setBusy(submitBtn,false);
     }
   });
   $$(".nav-item").forEach(btn=>btn.addEventListener("click",()=>setPage(btn.dataset.page)));
@@ -833,7 +847,7 @@
   $("#cc-analyze").addEventListener("click",async()=>{
     const text=$("#cc-text").value.trim();
     if(!text){$("#cc-text").focus();return;}
-    $("#cc-analyze").disabled=true;$("#cc-text").disabled=true;$("#cc-tz").disabled=true;
+    setBusy($("#cc-analyze"),true);$("#cc-text").disabled=true;$("#cc-tz").disabled=true;
     $("#cc-loading").hidden=false;$("#cc-error").hidden=true;
     try{
       const tz=$("#cc-tz").value;
@@ -850,6 +864,7 @@
       $("#cc-error").hidden=false;
     }finally{
       $("#cc-loading").hidden=true;
+      setBusy($("#cc-analyze"),false);$("#cc-text").disabled=false;$("#cc-tz").disabled=false;
     }
   });
   $("#cc-discard").addEventListener("click",async()=>{
@@ -896,7 +911,7 @@
       return {draft_item_id,accept:s.accept,fields:cleaned};
     });
     if(!selections.some(s=>s.accept)){showToast("Select at least one item");return;}
-    $("#cc-confirm").disabled=true;$("#cc-discard").disabled=true;
+    setBusy($("#cc-confirm"),true);$("#cc-discard").disabled=true;
     $("#cc-confirm-loading").hidden=false;$("#cc-confirm-error").hidden=true;
     try{
       const result=await contextcalRepository.confirm(contextcalDraft.entry.draft.draft_id,selections);
@@ -913,7 +928,7 @@
       $("#cc-confirm-error").hidden=false;
     }finally{
       $("#cc-confirm-loading").hidden=true;
-      $("#cc-confirm").disabled=false;$("#cc-discard").disabled=false;
+      setBusy($("#cc-confirm"),false);$("#cc-discard").disabled=false;
     }
   });
   refresh();

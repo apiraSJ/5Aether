@@ -3,12 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0f131c">
+  <meta name="theme-color" content="#ffffff">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%235146e5'/%3E%3Ctext x='16' y='23' font-size='20' font-family='Arial' font-weight='700' text-anchor='middle' fill='white'%3E%C3%86%3C/text%3E%3C/svg%3E">
   <title>Aether Mark-1 · ContextCal</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Wix+Madefor+Display:wght@500;600&family=Wix+Madefor+Text:wght@400;500;600&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/styles.css?v=4">
+  <link rel="stylesheet" href="/static/styles.css?v=5">
 </head>
 <body>
   <div class="app-shell">
@@ -61,7 +62,7 @@
           <button class="button button-primary" id="calendar-add"><span class="button-plus">＋</span> Add event</button>
         </div>
         <section class="content-card calendar-card">
-          <div class="calendar-toolbar"><div><h2 id="calendar-title">October 2026</h2><p class="muted">Your schedule for the month ahead.</p></div><div class="calendar-actions"><button class="icon-button" id="cal-prev" aria-label="Previous month">‹</button><button class="button button-light" id="cal-today">Today</button><button class="icon-button" id="cal-next" aria-label="Next month"></button><div class="view-switch" aria-label="Calendar view"><button class="view-button active" data-view="month">Month</button><button class="view-button" data-view="week">Week</button><button class="view-button" data-view="day">Day</button></div></div></div>
+          <div class="calendar-toolbar"><div><h2 id="calendar-title">October 2026</h2><p class="muted">Your schedule for the month ahead.</p></div><div class="calendar-actions"><button class="icon-button" id="cal-prev" aria-label="Previous month">‹</button><button class="button button-light" id="cal-today">Today</button><button class="icon-button" id="cal-next" aria-label="Next month">›</button><div class="view-switch" aria-label="Calendar view"><button class="view-button active" data-view="month">Month</button><button class="view-button" data-view="week">Week</button><button class="view-button" data-view="day">Day</button></div></div></div>
           <div class="calendar-weekdays"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div>
           <div class="calendar-grid" id="calendar-grid"></div>
           <div class="selected-day-panel" id="day-panel">
@@ -123,7 +124,8 @@
           <div class="cc-feedback cc-error" id="cc-confirm-error" hidden><span id="cc-confirm-error-message">Could not confirm.</span></div>
           <div class="cc-outcomes" id="cc-outcomes"></div>
         </section>
-        <footer class="app-footer"><span>Æ Aether Mark-1</span><span>Local workspace · Live data</span></footer>
+      </section>
+      <footer class="app-footer"><span>Æ Aether Mark-1</span><span>Local workspace · Live data</span></footer>
     </main>
   </div>
 
@@ -151,6 +153,6 @@
     </section>
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script src="/static/app.js?v=4"></script>
+  <script src="/static/app.js?v=5"></script>
 </body>
 </html>
